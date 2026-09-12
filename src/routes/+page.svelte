@@ -16,7 +16,15 @@
     best: number;
   }
 
-  const STORAGE_KEY = 'latent:game:v3';
+  interface ScoreHistogram {
+    date: string;
+    bucketSize: number;
+    bins: number[];
+    total: number;
+  }
+
+  const LEGACY_STORAGE_KEY = 'latent:game:v3';
+  const STORAGE_PREFIX = 'latent:game:v4';
   const STATS_KEY = 'latent:stats:v1';
   const SUBMISSION_ID_RE = /^[a-zA-Z0-9_-]{16,128}$/;
   const EMPTY_STATS: Stats = { streak: 0, max: 0, lastDate: null, played: 0, won: 0, score: 0, best: 0 };
@@ -44,6 +52,11 @@
   let confirmingGiveUp = $state(false);
   let dialog = $state<HTMLDialogElement | null>(null);
   let lastErrorCode = '';
+  let playableDates = $state<string[]>([]);
+  let selectedDate = $state('');
+  let nextGameIn = $state('');
+  let histogram = $state<ScoreHistogram | null>(null);
+  let histogramLoading = $state(false);
 
   const roundDone = $derived(view ? view.roundEnded : false);
   const dayDone = $derived(view ? view.finished : false);
@@ -52,6 +65,12 @@
     view ? [...view.results].sort((a, b) => a.index - b.index) : [],
   );
   const currentResult = $derived(roundResults.find((result) => result.index === view?.round) ?? null);
+  const histogramMax = $derived(histogram ? Math.max(1, ...histogram.bins) : 1);
+  const userScoreBucket = $derived(
+    histogram && view
+      ? Math.max(0, Math.min(histogram.bins.length - 1, Math.floor(view.score / histogram.bucketSize)))
+      : -1,
+  );
   const shareLink = $derived(
     typeof window === 'undefined' ? `${base}/` : new URL(`${base}/`, window.location.origin).toString(),
   );
@@ -69,6 +88,47 @@
     return new Date(Date.parse(`${date}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
   }
 
+  function gameStorageKey(game: GameRef): string {
+    return `${STORAGE_PREFIX}:${game.kind}:${game.kind === 'daily' ? game.date : game.seed}`;
+  }
+
+  function sameGame(a: GameRef | undefined, b: GameRef): boolean {
+    if (!a) return false;
+    if (a.kind === 'daily' && b.kind === 'daily') return a.date === b.date;
+    if (a.kind === 'random' && b.kind === 'random') return a.seed === b.seed;
+    return false;
+  }
+
+  function datesThrough(today: string): string[] {
+    const day = Date.parse(`${today}T00:00:00Z`);
+    return Array.from({ length: 4 }, (_, index) => new Date(day - index * 86_400_000).toISOString().slice(0, 10));
+  }
+
+  function dayLabel(index: number): string {
+    if (index === 0) return 'Today';
+    if (index === 1) return 'Yesterday';
+    return `${index} days ago`;
+  }
+
+  function updateCountdown(): void {
+    const now = new Date();
+    const next = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+    const seconds = Math.max(0, Math.floor((next - now.getTime()) / 1_000));
+    const hours = Math.floor(seconds / 3_600);
+    const minutes = Math.floor((seconds % 3_600) / 60);
+    const remainingSeconds = seconds % 60;
+    nextGameIn = [hours, minutes, remainingSeconds].map((part) => String(part).padStart(2, '0')).join(':');
+  }
+
+  function histogramLabel(index: number, bucketSize: number): string {
+    const start = index * bucketSize;
+    return start === 0 ? '0' : `${start / 1_000}k`;
+  }
+
+  function histogramBarHeight(count: number): number {
+    return count > 0 ? Math.max(8, (count / histogramMax) * 100) : 0;
+  }
+
   function createSubmissionId(): string {
     if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
     return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -77,6 +137,7 @@
   function recordStats() {
     if (dev) return;
     if (!view || view.game.kind !== 'daily' || !view.finished) return;
+    if (playableDates[0] && view.game.date !== playableDates[0]) return;
     if (stats.lastDate === view.game.date) return;
     const next = {
       ...stats,
@@ -95,6 +156,30 @@
     }
     stats = next;
     localStorage.setItem(STATS_KEY, JSON.stringify(next));
+  }
+
+  async function loadHistogram(game: GameRef): Promise<void> {
+    histogram = null;
+    if (game.kind !== 'daily') return;
+    histogramLoading = true;
+    try {
+      const res = await fetch(`${base}/api/stats/scores?date=${encodeURIComponent(game.date)}`);
+      if (!res.ok) return;
+      const data = (await res.json()) as Partial<ScoreHistogram>;
+      if (
+        data.date === game.date &&
+        typeof data.bucketSize === 'number' &&
+        Array.isArray(data.bins) &&
+        data.bins.every((count) => typeof count === 'number') &&
+        typeof data.total === 'number'
+      ) {
+        histogram = data as ScoreHistogram;
+      }
+    } catch {
+      histogram = null;
+    } finally {
+      histogramLoading = false;
+    }
   }
 
   async function post(next: Action[]): Promise<boolean> {
@@ -116,8 +201,9 @@
       lastErrorCode = '';
       view = data.view as GameView;
       actions = next;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ game: start.game, actions: next, submissionId }));
+      localStorage.setItem(gameStorageKey(start.game), JSON.stringify({ game: start.game, actions: next, submissionId }));
       recordStats();
+      if (view.finished) await loadHistogram(view.game);
       return true;
     } catch {
       lastErrorCode = 'network';
@@ -128,18 +214,31 @@
     }
   }
 
-  async function init() {
+  async function init(date?: string) {
+    busy = true;
+    error = '';
+    histogram = null;
+    actions = [];
+    submissionId = '';
+    guessInput = '';
+    conceptGuess = '';
+    confirmingGiveUp = false;
     try {
-      const res = await fetch(`${base}/api/puzzle/today`);
+      const query = date ? `?date=${encodeURIComponent(date)}` : '';
+      const res = await fetch(`${base}/api/puzzle/today${query}`);
       if (!res.ok) {
-        error = "Could not load today's puzzle.";
+        error = 'Could not load that daily game.';
         return;
       }
       const today = (await res.json()) as GameStart;
       start = today;
-      submissionId = '';
+      if (today.game.kind === 'daily') {
+        selectedDate = today.game.date;
+        if (playableDates.length === 0) playableDates = datesThrough(today.game.date);
+      }
 
-      const saved = dev ? null : localStorage.getItem(STORAGE_KEY);
+      const currentStorageKey = gameStorageKey(today.game);
+      const saved = localStorage.getItem(currentStorageKey) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
       if (saved) {
         let parsed: { game?: GameRef; actions?: Action[]; submissionId?: unknown } | null = null;
         try {
@@ -150,9 +249,7 @@
         const savedGame = parsed?.game;
         const savedActions = parsed?.actions;
         const savedSubmissionId = parsed?.submissionId;
-        const savedDate = savedGame?.kind === 'daily' ? savedGame.date : null;
-        const todayDate = today.game.kind === 'daily' ? today.game.date : null;
-        if (savedDate === todayDate && Array.isArray(savedActions)) {
+        if (sameGame(savedGame, today.game) && Array.isArray(savedActions)) {
           actions = savedActions;
           if (typeof savedSubmissionId === 'string' && SUBMISSION_ID_RE.test(savedSubmissionId)) {
             submissionId = savedSubmissionId;
@@ -164,7 +261,7 @@
       const ok = await post(actions);
       if (!ok && restored && RESET_CODES.has(lastErrorCode)) {
         actions = [];
-        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(currentStorageKey);
         await post([]);
       }
     } finally {
@@ -187,6 +284,11 @@
       guessInput = '';
       conceptGuess = '';
     }
+  }
+
+  async function selectDate(date: string): Promise<void> {
+    if (busy || date === selectedDate) return;
+    await init(date);
   }
 
   async function giveUp() {
@@ -219,7 +321,10 @@
         localStorage.removeItem(STATS_KEY);
       }
     }
+    updateCountdown();
+    const countdownTimer = window.setInterval(updateCountdown, 1_000);
     void init();
+    return () => window.clearInterval(countdownTimer);
   });
 </script>
 
@@ -260,6 +365,24 @@
       <button class="help" onclick={() => dialog?.showModal()}>How to play</button>
     </div>
   </header>
+
+  <div class="daily-controls">
+    {#if playableDates.length}
+      <nav class="day-picker" aria-label="Choose a daily game">
+        {#each playableDates as date, index}
+          <button
+            type="button"
+            class:active={date === selectedDate}
+            aria-current={date === selectedDate ? 'date' : undefined}
+            title={date}
+            disabled={busy}
+            onclick={() => void selectDate(date)}
+          >{dayLabel(index)}</button>
+        {/each}
+      </nav>
+    {/if}
+    <p class="countdown">Next game in <strong>{nextGameIn || '00:00:00'}</strong> UTC</p>
+  </div>
 
   {#if !view}
     <p class="muted loading">{error || 'Loading…'}</p>
@@ -373,6 +496,39 @@
             <span class="muted">streak {stats.streak} | best {stats.best} pts</span>
           {/if}
         </div>
+      </section>
+      <section class="score-distribution" aria-labelledby="score-distribution-title">
+        <div class="distribution-heading">
+          <div>
+            <h2 id="score-distribution-title">All player scores</h2>
+            {#if histogram}<p>{histogram.total} completed {histogram.total === 1 ? 'game' : 'games'} for this day</p>{/if}
+          </div>
+          <strong>{view.score} pts</strong>
+        </div>
+        {#if histogramLoading}
+          <p class="distribution-empty">Loading scores…</p>
+        {:else if histogram && histogram.total > 0}
+          <div class="histogram-scroll">
+            <div
+              class="histogram"
+              role="img"
+              aria-label={`Histogram of ${histogram.total} player scores. Your score is ${view.score} points.`}
+            >
+              {#each histogram.bins as count, index}
+                <div class="histogram-column" class:mine={index === userScoreBucket}>
+                  <span class="histogram-count">{count || ''}</span>
+                  <div class="histogram-track">
+                    <span class="histogram-bar" style:height={`${histogramBarHeight(count)}%`}></span>
+                  </div>
+                  <span class="histogram-label">{histogramLabel(index, histogram.bucketSize)}</span>
+                </div>
+              {/each}
+            </div>
+          </div>
+          <p class="distribution-note">Your score falls in the orange bar. Each bar covers 1,000 points.</p>
+        {:else}
+          <p class="distribution-empty">No completed-player scores have been recorded for this day yet.</p>
+        {/if}
       </section>
     {:else if roundDone}
       <section class="over">
@@ -549,6 +705,49 @@
     gap: 14px;
     padding-top: 8px;
     flex-shrink: 0;
+  }
+
+  .daily-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+
+  .day-picker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+
+  .day-picker button {
+    border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
+    border-radius: 9px;
+    padding: 7px 10px;
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 14px;
+    font-weight: 700;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .day-picker button.active {
+    border-color: var(--brand);
+    background: var(--brand);
+    color: var(--text);
+  }
+
+  .countdown {
+    margin: 0;
+    color: var(--muted);
+    font-size: 15px;
+    white-space: nowrap;
+  }
+
+  .countdown strong {
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
   }
 
   .status {
@@ -923,6 +1122,100 @@
     text-align: center;
   }
 
+  .score-distribution {
+    margin-top: 18px;
+    padding: 22px;
+    border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+    border-radius: 18px;
+    background: var(--surface);
+    box-shadow: var(--shadow-md);
+  }
+
+  .distribution-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 18px;
+  }
+
+  .distribution-heading h2 {
+    margin: 0;
+    font-size: 22px;
+  }
+
+  .distribution-heading p,
+  .distribution-note,
+  .distribution-empty {
+    margin: 4px 0 0;
+    color: var(--muted);
+    font-size: 15px;
+  }
+
+  .distribution-heading > strong {
+    color: var(--brand);
+    font-size: 18px;
+    white-space: nowrap;
+  }
+
+  .histogram-scroll {
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .histogram {
+    display: grid;
+    grid-template-columns: repeat(11, minmax(36px, 1fr));
+    align-items: end;
+    gap: 7px;
+    min-width: 520px;
+  }
+
+  .histogram-column {
+    display: grid;
+    grid-template-rows: 20px 140px 22px;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .histogram-count,
+  .histogram-label {
+    color: var(--muted);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+  }
+
+  .histogram-track {
+    display: flex;
+    align-items: flex-end;
+    overflow: hidden;
+    border-radius: 7px 7px 3px 3px;
+    background: var(--track);
+  }
+
+  .histogram-bar {
+    display: block;
+    width: 100%;
+    min-height: 0;
+    border-radius: 7px 7px 0 0;
+    background: var(--accent);
+    transition: height 300ms ease;
+  }
+
+  .histogram-column.mine .histogram-bar {
+    background: var(--brand);
+  }
+
+  .histogram-column.mine .histogram-label {
+    color: var(--text);
+    font-weight: 800;
+  }
+
+  .distribution-note {
+    margin-top: 12px;
+  }
+
   .answer-label {
     margin: 0;
     font-size: inherit;
@@ -1075,6 +1368,19 @@
 
     .head-right {
       padding-top: 0;
+    }
+
+    .daily-controls {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+
+    .day-picker {
+      width: 100%;
+    }
+
+    .day-picker button {
+      flex: 1;
     }
 
     .brand {

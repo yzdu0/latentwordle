@@ -1,7 +1,7 @@
 import type { GameRef, GameView } from '$lib/game/types.ts';
 import { computeView } from './engine.ts';
 import type { EngineResult } from './engine.ts';
-import { dayIndexOf } from './dates.ts';
+import { dayIndexOf, isPlayableDailyDate } from './dates.ts';
 import { getStore } from './platform.ts';
 import { mulberry32, randomAnswers } from './random.ts';
 import { dailySalt, gameRounds } from './settings.ts';
@@ -38,8 +38,8 @@ export async function scoreRequest(
 
   if (game.kind === 'daily') {
     const dayIndex = dayIndexOf(game.date);
-    if (dayIndex === null) {
-      return { ok: false, error: { error: 'bad_request', detail: 'invalid date' } };
+    if (dayIndex === null || !isPlayableDailyDate(game.date)) {
+      return { ok: false, error: { error: 'bad_request', detail: 'date is outside the playable range' } };
     }
     answers = await dailyAnswers(store, dayIndex, rounds, dailySalt());
   } else {

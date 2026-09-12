@@ -2,15 +2,15 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types.ts';
 import { MAX_TURNS } from '$lib/game/rules.ts';
 import type { GameStart } from '$lib/game/types.ts';
-import { dayIndexOf, todayUtc } from '$lib/server/dates.ts';
+import { dayIndexOf, isPlayableDailyDate, todayUtc } from '$lib/server/dates.ts';
 import { getStore } from '$lib/server/platform.ts';
 import { gameRounds } from '$lib/server/settings.ts';
 
 export const GET: RequestHandler = async ({ platform, url }) => {
   const date = url.searchParams.get('date') ?? todayUtc();
   const dayIndex = dayIndexOf(date);
-  if (dayIndex === null) {
-    return json({ error: 'bad_request', detail: 'invalid date' }, { status: 400 });
+  if (dayIndex === null || !isPlayableDailyDate(date)) {
+    return json({ error: 'bad_request', detail: 'date is outside the playable range' }, { status: 400 });
   }
 
   try {

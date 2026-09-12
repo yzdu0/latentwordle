@@ -1,3 +1,5 @@
+export const ARCHIVE_DAYS = 3;
+
 export function todayUtc(now = Date.now()): string {
   return new Date(now).toISOString().slice(0, 10);
 }
@@ -11,4 +13,10 @@ export function dayIndexOf(date: string): number | null {
 
 export function dateOfDayIndex(dayIndex: number): string {
   return new Date(dayIndex * 86_400_000).toISOString().slice(0, 10);
+}
+
+export function isPlayableDailyDate(date: string, now = Date.now()): boolean {
+  const requested = dayIndexOf(date);
+  const today = dayIndexOf(todayUtc(now));
+  return requested !== null && today !== null && requested <= today && requested >= today - ARCHIVE_DAYS;
 }
