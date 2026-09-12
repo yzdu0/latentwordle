@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { dev } from '$app/environment';
   import { base } from '$app/paths';
   import type { Action, GameRef, GameStart, GameView } from '$lib/game/types.ts';
 
@@ -54,12 +55,14 @@
   });
 
   const simTone = (similarity: number) => (similarity >= 0.6 ? 'good' : similarity >= 0.35 ? 'mid' : 'bad');
+  const signedPercent = (similarity: number) => `${Math.round(similarity * 100)}%`;
 
   function previousDate(date: string): string {
     return new Date(Date.parse(`${date}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
   }
 
   function recordStats() {
+    if (dev) return;
     if (!view || view.game.kind !== 'daily' || !view.finished) return;
     if (stats.lastDate === view.game.date) return;
     const next = {
@@ -122,7 +125,7 @@
       const today = (await res.json()) as GameStart;
       start = today;
 
-      const saved = localStorage.getItem(STORAGE_KEY);
+      const saved = dev ? null : localStorage.getItem(STORAGE_KEY);
       if (saved) {
         let parsed: { game?: GameRef; actions?: Action[] } | null = null;
         try {
@@ -196,7 +199,6 @@
   <header>
     <div class="brand-block">
       <h1 class="brand"><span class="brand-latent">Latent</span>Guess</h1>
-      <p class="tagline">find the hidden word by meaning</p>
     </div>
     <div class="head-right">
       <button class="help" onclick={() => dialog?.showModal()}>How to play</button>
@@ -238,35 +240,41 @@
     {/if}
 
     {#if view.history.length}
-      <p class="legend">
-        Your guess and its similarity, a hint with a multiplier, and how accurately the hint lands. Tap a
-        clue to try it.
-      </p>
       <section class="board" aria-label="Guess history">
         {#each view.history as entry, i (i)}
           {#if entry.type === 'guess'}
             {@const guess = entry}
             <div class="row">
-              <span class="word">{guess.word}</span>
-              <span class="sim {simTone(guess.similarity)}" title="Direct similarity to the hidden word">
-                {Math.max(0, Math.round(guess.similarity * 100))}%
-              </span>
-              <span class="arrow" aria-hidden="true">→</span>
-              <button
-                class="clue"
-                onclick={() => (guessInput = guess.clue)}
-                title={`Use "${guess.clue}" as your next guess`}
-              >
-                {#if guess.multiplier !== null}<span class="mult">{guess.multiplier.toFixed(1)} ×</span>{/if}{guess.clue}
-              </button>
-              <span
-                class="sum"
-                title={`Closest word to the vector sum: "${guess.sumWord}" — ${Math.round(
-                  guess.sumSimilarity * 100,
-                )}% similar to the hidden word`}
-              >
-                {Math.max(0, Math.round(guess.sumSimilarity * 100))}%
-              </span>
+              {#if guess.clue}
+                <div
+                  class="equation"
+                  aria-label={`Hidden word approximately equals ${guess.word} at ${signedPercent(guess.similarity)} plus ${guess.multiplier?.toFixed(1) ?? '1.0'} times ${guess.clue} at ${signedPercent(guess.clueSimilarity)}${guess.secondClue ? ` plus ${guess.secondMultiplier?.toFixed(1) ?? '1.0'} times ${guess.secondClue} at ${signedPercent(guess.secondClueSimilarity ?? 0)}` : ''}`}
+                >
+                  <span class="hidden-word" title="Hidden word">✦</span>
+                  <span class="operator result" aria-hidden="true">≈</span>
+                  <span class="term guess-term {simTone(guess.similarity)}">
+                    <span>{guess.word}</span><span class="term-sim">{signedPercent(guess.similarity)}</span>
+                  </span>
+                  <span class="operator" aria-hidden="true">+</span>
+                  <span class="term clue {simTone(guess.clueSimilarity)}">
+                    <span>{#if guess.multiplier !== null}<span class="mult">{guess.multiplier.toFixed(1)} ×</span>{/if}{guess.clue}</span><span class="term-sim">{signedPercent(guess.clueSimilarity)}</span>
+                  </span>
+                  {#if guess.secondClue}
+                    <span class="operator" aria-hidden="true">+</span>
+                    <span class="term clue second {simTone(guess.secondClueSimilarity ?? 0)}">
+                      <span>{#if guess.secondMultiplier !== null}<span class="mult">{guess.secondMultiplier.toFixed(1)} ×</span>{/if}{guess.secondClue}</span><span class="term-sim">{signedPercent(guess.secondClueSimilarity ?? 0)}</span>
+                    </span>
+                  {/if}
+                </div>
+              {:else}
+                <span class="equation">
+                  <span class="hidden-word" title="Hidden word">✦</span>
+                  <span class="operator result" aria-hidden="true">≈</span>
+                  <span class="term guess-term {simTone(guess.similarity)}">
+                    <span>{guess.word}</span><span class="term-sim">{signedPercent(guess.similarity)}</span>
+                  </span>
+                </span>
+              {/if}
             </div>
           {:else}
             <div class="row giveup-row">
@@ -276,7 +284,7 @@
         {/each}
       </section>
     {:else if !roundDone}
-      <p class="empty">Guess any word to begin. Every guess shows how close you are and which way to move.</p>
+      <p class="empty">Guess any word to begin.</p>
     {/if}
 
     {#if dayDone}
@@ -305,7 +313,7 @@
       <form class="entry" onsubmit={submitGuess}>
         <input
           bind:value={guessInput}
-          placeholder="guess a word"
+          placeholder={guessesLeft === 1 ? 'guess a word · 1 left' : `guess a word · ${guessesLeft} left`}
           autocomplete="off"
           autocapitalize="off"
           spellcheck="false"
@@ -327,46 +335,46 @@
     {/if}
   {/if}
 
-  <footer class="foot">hints from GloVe · Wikipedia + Gigaword</footer>
-
   <dialog bind:this={dialog} aria-labelledby="howto-title">
     <div class="sheet">
       <div class="sheet-head">
         <h2 id="howto-title">How to play</h2>
         <button class="close" onclick={() => dialog?.close()} aria-label="Close">×</button>
       </div>
-      <p>Five hidden words a day with 10 guesses each. Every guess gives three signals:</p>
+      <p>Find five hidden words, with 10 guesses for each word.</p>
       <ul>
-        <li><strong>Similarity</strong>: how close your word is to the hidden word (100% = the same word).</li>
         <li>
-          <strong>A hint</strong>: a word and how much of it to take.
+          The percentage shows your guess's similarity to the hidden word.
         </li>
         <li>
-          <strong>Hint accuracy</strong>: the small percentage after the hint: how close that nudge lands to
-          the hidden word.
+          The equation shows one, sometimes two words that linearly combine with your guess to approximate the hidden word.
         </li>
       </ul>
       <p>
-        Example: hidden word <em>winter</em>, guess <em>snow</em> → <strong>0.5 × summer</strong>. Tap a hint to try it.
+        Example: hidden word <em>winter</em>, guess <em>holiday</em> →
+        <strong>X = holiday + 0.4 × snow + 0.3 × season</strong>.
       </p>
       <p>
         Guessing the hidden word, or a close form of it like <em>employed</em> for <em>employment</em>, solves
         the round. Each guess scores its similarity, and solving early adds up to 2,000 points. Give up to skip
         a word, then share your five results.
+        <br>
+        <br>
+        Note that similarity does <em>not</em> direct measure semantic relatedness, rather it measures how similar the words are in the context of the training corpus. 
       </p>
       <h3>How it works</h3>
       <p>
-        Words are 300-dimension vectors from <strong>GloVe</strong>, trained on about 6 billion words of English
-        (2014 Wikipedia plus the Gigaword news archive). Similar vectors mean similar usage: <em>sea</em> and
-        <em>ocean</em> are close, and so are opposites like <em>hot</em> and <em>cold</em>. The percentage next
-        to a guess is its cosine similarity to the hidden word.
+        Words are 300-dimension vectors from <strong>GloVe</strong>. Similar vectors represent words used in
+        similar contexts.
       </p>
       <p>
-        Hints use vector arithmetic: the app builds the arrow <strong>Y − X</strong> from your guess X to the
-        hidden word Y, picks the word W pointing closest along it, and shows the best multiple. Hint accuracy
-        adds that multiple back onto your guess (<strong>X + 0.5 × W</strong>), finds the nearest real word to
-        that point, and scores it against Y. Hints never name the hidden word or close forms, and get sharper as
-        you get closer.
+        Hints use vector arithmetic: the app builds the arrow from your guess to the hidden word X and picks a
+        relevant word with a positive projection along it. The display shows this as
+        <strong>X = your guess + the hint path</strong>. It can then fit a distinct
+        second word against the remaining error and refit both positive coefficients together. The two-word form is
+        shown only when its nearest real-word landing is significantly closer than the best
+        one-word result. Hints come from a curated pool, are at least 25% related to the answer, avoid word-form
+        repeats, never name the hidden word, and become more direct as your guesses get closer.
       </p>
       <button class="primary done" onclick={() => dialog?.close()}>Got it</button>
     </div>
@@ -375,7 +383,7 @@
 
 <style>
   main {
-    max-width: 600px;
+    max-width: 700px;
     margin: 0 auto;
     padding: 40px 22px 72px;
   }
@@ -507,12 +515,6 @@
     cursor: default;
   }
 
-  .legend {
-    font-size: 12px;
-    color: var(--muted);
-    margin: 0 0 10px;
-  }
-
   .empty {
     margin: 30px 0 0;
     text-align: center;
@@ -529,10 +531,11 @@
   .row {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 12px 14px;
+    gap: 9px;
+    padding: 9px 11px;
     background: var(--surface);
     border-radius: var(--radius);
+    border: 1px solid color-mix(in srgb, var(--text) 7%, transparent);
     box-shadow: var(--shadow-sm);
     transition:
       box-shadow 200ms ease,
@@ -546,7 +549,9 @@
   }
 
   .giveup-row {
+    display: flex;
     justify-content: center;
+    padding: 10px 14px;
     font-size: 13px;
     background: transparent;
     box-shadow: none;
@@ -560,67 +565,88 @@
     }
   }
 
-  .word {
-    font-weight: 600;
-    font-size: 15px;
+  .equation {
+    display: flex;
+    align-items: center;
+    flex: 1;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    gap: 5px;
+    flex-wrap: wrap;
   }
 
-  .sim {
-    font-size: 12px;
+  .operator {
+    color: var(--muted);
+    flex-shrink: 0;
     font-weight: 600;
-    font-variant-numeric: tabular-nums;
+  }
+
+  .operator.result {
+    margin-inline: 2px;
+    color: var(--text);
+  }
+
+  .hidden-word {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    background: var(--text);
+    color: var(--surface);
+    font-size: 14px;
+    font-weight: 800;
+  }
+
+  .term {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 7px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 650;
     flex-shrink: 0;
-    color: var(--muted);
   }
 
-  .sim.good {
-    color: var(--good);
-  }
-
-  .sim.mid {
-    color: var(--mid);
-  }
-
-  .sim.bad {
-    color: var(--bad);
-  }
-
-  .arrow {
-    color: var(--muted);
-    flex-shrink: 0;
+  .guess-term {
+    background: var(--track);
+    color: var(--text);
   }
 
   .clue {
-    margin-left: auto;
-    border: 0;
     background: color-mix(in srgb, var(--accent) 12%, transparent);
-    padding: 5px 12px;
-    border-radius: 8px;
-    font-weight: 600;
     color: var(--accent);
-    flex-shrink: 0;
-    transition: background 160ms ease;
   }
 
-  .clue:hover {
-    background: color-mix(in srgb, var(--accent) 22%, transparent);
+  .clue.second {
+    background: color-mix(in srgb, var(--brand) 12%, transparent);
+    color: var(--brand);
+  }
+
+  .term-sim {
+    padding-left: 5px;
+    border-left: 1px solid color-mix(in srgb, currentColor 24%, transparent);
+    font-size: 11px;
+    font-weight: 750;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .term.good .term-sim {
+    color: var(--good);
+  }
+
+  .term.mid .term-sim {
+    color: var(--mid);
+  }
+
+  .term.bad .term-sim {
+    color: var(--bad);
   }
 
   .mult {
     color: var(--muted);
     font-weight: 600;
     margin-right: 2px;
-  }
-
-  .sum {
-    font-size: 12px;
-    font-variant-numeric: tabular-nums;
-    color: var(--muted);
-    flex-shrink: 0;
   }
 
   .entry {
@@ -696,7 +722,6 @@
   }
 
   .help:focus-visible,
-  .clue:focus-visible,
   .close:focus-visible {
     color: var(--text);
   }
@@ -772,14 +797,6 @@
 
   .muted {
     color: var(--muted);
-  }
-
-  .foot {
-    margin-top: 64px;
-    text-align: center;
-    font-size: 12px;
-    color: var(--muted);
-    opacity: 0.75;
   }
 
   dialog {
@@ -869,6 +886,7 @@
     .brand {
       font-size: 32px;
     }
+
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -876,8 +894,7 @@
     .progress-fill,
     .entry input,
     .entry button,
-    .over button,
-    .clue {
+    .over button {
       animation: none;
       transition: none;
     }

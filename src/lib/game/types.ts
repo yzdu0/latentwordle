@@ -16,10 +16,19 @@ export interface GuessEntry {
   turn: number;
   word: string;
   similarity: number;
+  similarityPercentile: number;
   clue: string;
   multiplier: number | null;
+  clueSimilarity: number;
+  secondClue: string | null;
+  secondMultiplier: number | null;
+  secondClueSimilarity: number | null;
   sumWord: string;
   sumSimilarity: number;
+  sumPercentile: number;
+  suggestion: string;
+  suggestionSimilarity: number;
+  suggestionPercentile: number;
 }
 
 export interface GiveUpEntry {

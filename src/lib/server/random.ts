@@ -12,13 +12,17 @@ export function mulberry32(seed: number): () => number {
   };
 }
 
-export async function randomAnswers(store: Store, seed: number): Promise<string[] | null> {
+export async function randomAnswers(
+  store: Store,
+  seed: number,
+  rounds = MAX_ROUNDS,
+): Promise<string[] | null> {
   const puzzles = await store.getPuzzles();
-  if (puzzles.length < MAX_ROUNDS) return null;
+  if (puzzles.length < rounds) return null;
   const rng = mulberry32(seed);
   const used = new Set<number>();
   const answers: string[] = [];
-  while (answers.length < MAX_ROUNDS) {
+  while (answers.length < rounds) {
     const index = Math.floor(rng() * puzzles.length);
     if (used.has(index)) continue;
     used.add(index);

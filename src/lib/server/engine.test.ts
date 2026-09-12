@@ -42,7 +42,6 @@ const entries = {
   forest: [0.2, 0.4, 0.9],
   puppy: [0.2, 0.98, 0],
   wolfs: [0.1, 0.99, 0],
-  zork: [-1, 0, 0],
 };
 
 const answers = ['wolf', 'moon', 'cat', 'forest', 'puppy'];
@@ -68,43 +67,115 @@ describe('isVariant', () => {
 });
 
 describe('clueSimilarityCap', () => {
-  it('keeps far guesses cryptic and close guesses direct', () => {
+  it('keeps early clues indirect and lets later clues get warmer', () => {
     expect(clueSimilarityCap(0)).toBe(0.5);
-    expect(clueSimilarityCap(0.1)).toBe(0.5);
     expect(clueSimilarityCap(0.4)).toBeCloseTo(0.75);
-    expect(clueSimilarityCap(0.6)).toBe(0.9);
-    expect(clueSimilarityCap(0.95)).toBe(0.9);
+    expect(clueSimilarityCap(0.8)).toBe(0.9);
   });
 });
 
 describe('nearestToDifference', () => {
-  it('returns a scaled hint and skips near-answer words', () => {
+  it('returns a scaled hint', () => {
     const store = new FakeVocabStore(entries);
     const clue = nearestToDifference(store.vocab, store.vocab.index.get('cat')!, store.vocab.index.get('wolf')!);
     expect(clue.word).toBe('forest');
     expect(clue.multiplier).toBe(0.2);
   });
 
-  it('never returns the answer or a variant', () => {
+  it('rejects negative projections in favor of a positive hint', () => {
+    const store = new FakeVocabStore({
+      cat: [1, 0, 0],
+      wolf: [0, 1, 0],
+      forest: [0.2, 0.4, 0.9],
+      lair: [0.6, 0.3, 0.74],
+    });
+    const clue = nearestToDifference(store.vocab, store.vocab.index.get('cat')!, store.vocab.index.get('wolf')!);
+    expect(clue.word).toBe('forest');
+    expect(clue.multiplier).toBeGreaterThan(0);
+  });
+
+  it('never returns the exact answer', () => {
     const store = new FakeVocabStore(entries);
     const clue = nearestToDifference(store.vocab, store.vocab.index.get('cat')!, store.vocab.index.get('wolf')!);
     expect(clue.word).not.toBe('wolf');
-    expect(clue.word).not.toBe('wolfs');
   });
 
-  it('draws clues only from hint-eligible words', () => {
-    const hintEntries = {
+  it('draws hints only from the approved hint pool', () => {
+    const store = new FakeVocabStore(entries, new Set(['cat', 'wolf', 'forest']));
+    const clue = nearestToDifference(store.vocab, store.vocab.index.get('cat')!, store.vocab.index.get('wolf')!);
+    expect(clue.word).toBe('forest');
+  });
+
+  it('never falls below the 25% answer-relevance floor', () => {
+    const store = new FakeVocabStore({
       cat: [1, 0, 0],
       wolf: [0, 1, 0],
-      moon: [0, 0.6, 0.8],
-      glade: [0.3, 0.5, 0.81],
-    };
-    const store = new FakeVocabStore(hintEntries, new Set(['cat', 'wolf', 'glade']));
+      obscure: [0.1, 0.2, 0.97],
+    });
     const clue = nearestToDifference(store.vocab, store.vocab.index.get('cat')!, store.vocab.index.get('wolf')!);
-    expect(clue.word).toBe('glade');
-    expect(clue.sumWord).toBe('glade');
-    expect(store.vocab.index.has('moon')).toBe(true);
-    expect(store.vocab.hints[store.vocab.index.get('moon')!]).toBe(0);
+    expect(clue.word).toBe('');
+    expect(clue.multiplier).toBeNull();
+  });
+
+  it('respects the dynamic similarity cap', () => {
+    const store = new FakeVocabStore({
+      cat: [1, 0, 0],
+      wolf: [0, 1, 0],
+      twin: [0.1, 0.99, 0.05],
+      far: [0.2, 0.4, 0.9],
+    });
+    const clue = nearestToDifference(store.vocab, store.vocab.index.get('cat')!, store.vocab.index.get('wolf')!);
+    expect(clue.word).not.toBe('twin');
+    expect(clue.word).toBe('far');
+  });
+
+  it('does not return a variant of the guess', () => {
+    const store = new FakeVocabStore({
+      election: [1, 0, 0],
+      elections: [0.99, 0.01, 0],
+      winter: [0, 1, 0],
+      snow: [0.2, 0.4, 0.9],
+    });
+    const clue = nearestToDifference(
+      store.vocab,
+      store.vocab.index.get('election')!,
+      store.vocab.index.get('winter')!,
+    );
+    expect(clue.word).toBe('snow');
+    expect(clue.multiplier).toBeGreaterThan(0);
+  });
+
+  it('does not repeat an excluded clue', () => {
+    const store = new FakeVocabStore(entries);
+    const excluded = new Set([store.vocab.index.get('forest')!]);
+    const clue = nearestToDifference(
+      store.vocab,
+      store.vocab.index.get('cat')!,
+      store.vocab.index.get('wolf')!,
+      excluded,
+    );
+    expect(clue.word).not.toBe('forest');
+  });
+
+  it('uses a two-word fit when its landing is materially warmer', () => {
+    const store = new FakeVocabStore({
+      guess: [1, 0, 0, 0],
+      target: [0, 1, 0, 0],
+      north: [-0.5, 0.4, 0.768, 0],
+      norths: [-0.5, 0.8, 0, 0.3],
+      south: [-0.5, 0.4, -0.768, 0],
+      bridge: [-0.5, 0.8, 0, 0.332],
+    });
+    const clue = nearestToDifference(
+      store.vocab,
+      store.vocab.index.get('guess')!,
+      store.vocab.index.get('target')!,
+    );
+    expect(clue.secondWord).not.toBeNull();
+    expect(clue.secondMultiplier).toBeGreaterThan(0);
+    expect(clue.sumWord).toBe('bridge');
+    expect(clue.suggestion).toBe('bridge');
+    expect(clue.sumSimilarity).toBeGreaterThanOrEqual(0.79);
   });
 });
 
@@ -122,10 +193,19 @@ describe('computeView', () => {
         turn: 1,
         word: 'cat',
         similarity: 0,
+        similarityPercentile: 0.167,
         clue: 'forest',
         multiplier: 0.2,
+        clueSimilarity: 0.402,
+        secondClue: null,
+        secondMultiplier: null,
+        secondClueSimilarity: null,
         sumWord: 'forest',
         sumSimilarity: 0.402,
+        sumPercentile: 0.333,
+        suggestion: 'forest',
+        suggestionSimilarity: 0.402,
+        suggestionPercentile: 0.333,
       },
     ]);
   });

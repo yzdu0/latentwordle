@@ -7,9 +7,8 @@ import { STOPWORDS } from '../spike/lib/vocab.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const CACHE = path.join(ROOT, '.cache');
-const MIN_CONCRETENESS = 1.5;
-const GERUND_CONCRETENESS = 2.5;
-const MAX_RANK = 8_000;
+const MIN_CONCRETENESS = 3.0;
+const MAX_RANK = 5_000;
 const MAX_ANSWERS = 4_000;
 const CONCRETENESS_URL =
   'https://raw.githubusercontent.com/desmond-ong/colorMeText/master/lexicons/Concreteness_ratings_Brysbaert_et_al_BRM_parsed.csv';
@@ -74,6 +73,8 @@ function indexLemmas(file: string): Set<string> {
   return set;
 }
 const verbs = indexLemmas('index.verb');
+const adjectives = indexLemmas('index.adj');
+const adverbs = indexLemmas('index.adv');
 
 const instanceOffsets = new Set<string>();
 for (const line of fs.readFileSync(path.join(dictDir, 'data.noun'), 'utf8').split('\n')) {
@@ -140,9 +141,12 @@ for (const word of vocab) {
   if (PROPER_ADJECTIVES.has(word)) continue;
   if (STOPWORDS.has(word) || blocklist.has(word)) continue;
   if (!nouns.has(word) || properFirstSense.has(word)) continue;
+  // Without a reliable dominant-part-of-speech corpus, prefer unambiguous nouns.
+  // Polysemous words remain valid guesses, but make inconsistent hidden answers.
+  if (verbs.has(word) || adjectives.has(word) || adverbs.has(word)) continue;
   const rating = concreteness.get(word);
   if (rating === undefined || rating < MIN_CONCRETENESS) continue;
-  if (word.endsWith('ing') && rating < GERUND_CONCRETENESS && verbStems(word).some((stem) => verbs.has(stem))) {
+  if (word.endsWith('ing') && verbStems(word).some((stem) => verbs.has(stem))) {
     continue;
   }
   if (word.endsWith('s') && !NON_PLURAL_S.has(word) && singularForms(word).some((form) => inVocab.has(form))) {

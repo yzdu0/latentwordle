@@ -4,6 +4,13 @@
   "main": ".svelte-kit/cloudflare/_worker.js",
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "LOCAL_SEED": "106777546"
+  },
+  "routes": [
+    { "pattern": "nphard.app/latent", "zone_name": "nphard.app" },
+    { "pattern": "nphard.app/latent/*", "zone_name": "nphard.app" }
+  ],
   "assets": {
     "directory": ".svelte-kit/cloudflare",
     "binding": "ASSETS"
