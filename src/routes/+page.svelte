@@ -498,15 +498,9 @@
         </div>
       </section>
       <section class="score-distribution" aria-labelledby="score-distribution-title">
-        <div class="distribution-heading">
-          <div>
-            <h2 id="score-distribution-title">All player scores</h2>
-            {#if histogram}<p>{histogram.total} completed {histogram.total === 1 ? 'game' : 'games'} for this day</p>{/if}
-          </div>
-          <strong>{view.score} pts</strong>
-        </div>
+        <h2 id="score-distribution-title">Scores</h2>
         {#if histogramLoading}
-          <p class="distribution-empty">Loading scores…</p>
+          <p class="distribution-empty">Loading…</p>
         {:else if histogram && histogram.total > 0}
           <div class="histogram-scroll">
             <div
@@ -525,9 +519,8 @@
               {/each}
             </div>
           </div>
-          <p class="distribution-note">Your score falls in the orange bar. Each bar covers 1,000 points.</p>
         {:else}
-          <p class="distribution-empty">No completed-player scores have been recorded for this day yet.</p>
+          <p class="distribution-empty">No scores yet.</p>
         {/if}
       </section>
     {:else if roundDone}
@@ -1123,39 +1116,20 @@
   }
 
   .score-distribution {
-    margin-top: 18px;
-    padding: 22px;
-    border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
-    border-radius: 18px;
-    background: var(--surface);
-    box-shadow: var(--shadow-md);
+    margin-top: 26px;
+    padding-top: 20px;
+    border-top: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
   }
 
-  .distribution-heading {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 18px;
-    margin-bottom: 18px;
+  .score-distribution h2 {
+    margin: 0 0 12px;
+    font-size: 18px;
   }
 
-  .distribution-heading h2 {
-    margin: 0;
-    font-size: 22px;
-  }
-
-  .distribution-heading p,
-  .distribution-note,
   .distribution-empty {
-    margin: 4px 0 0;
+    margin: 0;
     color: var(--muted);
     font-size: 15px;
-  }
-
-  .distribution-heading > strong {
-    color: var(--brand);
-    font-size: 18px;
-    white-space: nowrap;
   }
 
   .histogram-scroll {
@@ -1189,14 +1163,14 @@
   .histogram-track {
     display: flex;
     align-items: flex-end;
+    justify-content: center;
     overflow: hidden;
-    border-radius: 7px 7px 3px 3px;
-    background: var(--track);
+    border-bottom: 1px solid color-mix(in srgb, var(--text) 14%, transparent);
   }
 
   .histogram-bar {
     display: block;
-    width: 100%;
+    width: 72%;
     min-height: 0;
     border-radius: 7px 7px 0 0;
     background: var(--accent);
@@ -1210,10 +1184,6 @@
   .histogram-column.mine .histogram-label {
     color: var(--text);
     font-weight: 800;
-  }
-
-  .distribution-note {
-    margin-top: 12px;
   }
 
   .answer-label {
