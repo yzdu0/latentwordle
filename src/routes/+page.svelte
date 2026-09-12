@@ -362,10 +362,35 @@
         Stuck on a word? <strong>Give up</strong> to skip it and keep the points you earned. After all
         five words, share your day.
       </p>
+      <h3>How similarity works</h3>
+      <p>
+        Every word becomes <strong>300 numbers</strong> — its vector — learned by <strong>GloVe</strong> from
+        about 6 billion words of English (the 2014 Wikipedia dump plus the Gigaword news archive). A vector
+        records the kinds of sentences the word tends to appear in.
+      </p>
+      <p>
+        Two words are <strong>similar</strong> when their vectors point in the same direction. The percentage
+        shown next to a guess is their <strong>cosine similarity</strong>:
+      </p>
+      <ul>
+        <li>
+          <strong>100%</strong> — the same direction: the word itself, or one used in nearly identical
+          sentences.
+        </li>
+        <li>
+          <strong>0%</strong> — unrelated directions: the words share almost no context. Slightly negative
+          values are shown as 0%.
+        </li>
+      </ul>
+      <p>
+        Similarity is about <strong>usage, not spelling or dictionary meaning</strong>. <em>Sea</em> is close
+        to <em>ocean</em> because they appear in similar sentences. <em>Hot</em> and <em>cold</em> are also
+        fairly close — they are opposites, but they show up in the same kinds of sentences. A word with several
+        meanings sits between all of them.
+      </p>
       <p class="source">
-        Meanings come from <strong>GloVe</strong> word vectors trained on the 2014 Wikipedia dump plus the
-        Gigaword news archive — about 6 billion words of English. Words used in similar contexts end up
-        close together in that space.
+        So a high percentage means “used the way the hidden word is used”, not “defined the same way”. The
+        percentages reflect the training text, including its quirks and biases.
       </p>
       <button class="primary done" onclick={() => dialog?.close()}>Got it</button>
     </div>
@@ -813,6 +838,12 @@
     font-size: 18px;
     font-weight: 700;
     letter-spacing: -0.01em;
+  }
+
+  .sheet h3 {
+    margin: 16px 0 4px;
+    font-size: 14px;
+    font-weight: 700;
   }
 
   .sheet p {
