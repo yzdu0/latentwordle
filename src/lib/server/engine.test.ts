@@ -8,7 +8,7 @@ import { l2normalize, quantize } from '$lib/game/scoring.ts';
 class FakeVocabStore implements Store {
   vocab: Vocab;
 
-  constructor(entries: Record<string, number[]>) {
+  constructor(entries: Record<string, number[]>, hintWords?: Set<string>) {
     const words = Object.keys(entries);
     const dim = entries[words[0]].length;
     const bytes = new Int8Array(words.length * dim);
@@ -16,7 +16,8 @@ class FakeVocabStore implements Store {
       const q = quantize(l2normalize(entries[word]));
       bytes.set(new Uint8Array(q.buffer), i * dim);
     });
-    this.vocab = { dim, words, index: new Map(words.map((w, i) => [w, i])), bytes };
+    const hints = Uint8Array.from(words, (word) => (!hintWords || hintWords.has(word) ? 1 : 0));
+    this.vocab = { dim, words, index: new Map(words.map((w, i) => [w, i])), bytes, hints };
   }
 
   async getPuzzle(): Promise<Puzzle | null> {
@@ -88,6 +89,21 @@ describe('nearestToDifference', () => {
     expect(clue.word).not.toBe('wolf');
     expect(clue.word).not.toBe('wolfs');
   });
+
+  it('draws clues only from hint-eligible words', () => {
+    const hintEntries = {
+      cat: [1, 0, 0],
+      wolf: [0, 1, 0],
+      moon: [0, 0.6, 0.8],
+      glade: [0.3, 0.5, 0.81],
+    };
+    const store = new FakeVocabStore(hintEntries, new Set(['cat', 'wolf', 'glade']));
+    const clue = nearestToDifference(store.vocab, store.vocab.index.get('cat')!, store.vocab.index.get('wolf')!);
+    expect(clue.word).toBe('glade');
+    expect(clue.sumWord).toBe('glade');
+    expect(store.vocab.index.has('moon')).toBe(true);
+    expect(store.vocab.hints[store.vocab.index.get('moon')!]).toBe(0);
+  });
 });
 
 describe('computeView', () => {
@@ -127,6 +143,14 @@ describe('computeView', () => {
   it('keeps the answer hidden while the round is live', async () => {
     const result = await run(new FakeVocabStore(entries), [guess('cat')]);
     expect(result.ok && result.view.roundAnswer).toBeNull();
+  });
+
+  it('accepts non-hint words as guesses', async () => {
+    const store = new FakeVocabStore(entries, new Set(['cat', 'wolf']));
+    const result = await run(store, [guess('moon')]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.view.history[0]).toMatchObject({ word: 'moon' });
   });
 
   it('reveals the answer and scores the round when solved', async () => {

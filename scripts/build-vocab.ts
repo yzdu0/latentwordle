@@ -11,7 +11,8 @@ import { STOPWORDS } from '../spike/lib/vocab.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const CACHE = path.join(ROOT, '.cache');
-const MAX_VOCAB = 15_000;
+const MAX_VOCAB = 100_000;
+const HINT_LIMIT = 15_000;
 const WORD_RE = /^[a-z]{3,15}$/;
 const FREQUENCY_URL =
   'https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/en/en_50k.txt';
@@ -133,9 +134,10 @@ const blocklist = new Set(
     .filter(Boolean),
 );
 
-const kept: string[] = [];
+const clean: string[] = [];
+const proper: string[] = [];
 const seen = new Set<string>();
-const dropped: Record<string, string[]> = { instance: [], rare: [], unknown: [], filtered: [] };
+const dropped: Record<string, string[]> = { rare: [], unknown: [], filtered: [] };
 const missingAnswers = new Set(answers);
 
 const rl = readline.createInterface({
@@ -158,34 +160,45 @@ for await (const line of rl) {
       if (dropped.filtered.length < 40) dropped.filtered.push(word);
       continue;
     }
-    if (kept.length >= MAX_VOCAB) continue;
     const rank = frequency.get(word);
     if (rank === undefined || rank > 50_000) {
       if (dropped.unknown.length < 40) dropped.unknown.push(word);
       continue;
     }
     if (hasStem(word, anyLemma) && !hasStem(word, commonLemma)) {
-      if (dropped.instance.length < 40) dropped.instance.push(word);
+      proper.push(word);
+      seen.add(word);
       continue;
     }
+    if (clean.length >= MAX_VOCAB) continue;
     if (!hasStem(word, commonLemma) && rank > 2_000) {
       if (dropped.rare.length < 40) dropped.rare.push(word);
       continue;
     }
   }
-  kept.push(word);
+  clean.push(word);
   seen.add(word);
   missingAnswers.delete(word);
-  if (kept.length >= MAX_VOCAB && missingAnswers.size === 0) break;
+  if (clean.length >= MAX_VOCAB && missingAnswers.size === 0) break;
 }
 
 if (missingAnswers.size > 0) {
   throw new Error(`answers missing from ${EMBEDDING.model}: ${[...missingAnswers].join(', ')}`);
 }
 
+const kept = [...clean, ...proper];
 const outPath = path.join(ROOT, 'data/vocab.txt');
 fs.writeFileSync(outPath, kept.join('\n') + '\n');
-console.error(`\nvocabulary: ${kept.length} words -> ${outPath}`);
+fs.writeFileSync(
+  path.join(ROOT, 'data/vocab-meta.json'),
+  JSON.stringify(
+    { model: EMBEDDING.model, clean: clean.length, proper: proper.length, hintLimit: HINT_LIMIT },
+    null,
+    2,
+  ) + '\n',
+);
+console.error(`\nvocabulary: ${kept.length} words (${clean.length} common, ${proper.length} proper) -> ${outPath}`);
+console.error(`hint pool: first ${HINT_LIMIT} common words + ${proper.length} proper nouns`);
 for (const [reason, sample] of Object.entries(dropped)) {
   console.error(`  dropped ${reason}: ${sample.slice(0, 20).join(' ')}`);
 }

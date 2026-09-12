@@ -32,6 +32,16 @@ const vocabulary = fs
   .map((line) => line.trim())
   .filter(Boolean);
 const answers = JSON.parse(fs.readFileSync(path.join(ROOT, 'data/answers.json'), 'utf8')) as string[];
+const vocabMeta = JSON.parse(fs.readFileSync(path.join(ROOT, 'data/vocab-meta.json'), 'utf8')) as {
+  clean: number;
+  proper: number;
+  hintLimit: number;
+};
+const cleanLimit = Math.min(vocabMeta.hintLimit, vocabMeta.clean);
+const hintWords = new Set([
+  ...vocabulary.slice(0, cleanLimit),
+  ...vocabulary.slice(vocabMeta.clean),
+]);
 
 const seen = new Set<string>();
 const words: string[] = [];
@@ -40,7 +50,10 @@ for (const word of [...vocabulary, ...answers]) {
   seen.add(word);
   words.push(word);
 }
-console.error(`vocabulary: ${words.length} words`);
+const hints = Uint8Array.from(words, (word) => (hintWords.has(word) ? 1 : 0));
+console.error(
+  `vocabulary: ${words.length} words (${hints.reduce((sum, flag) => sum + flag, 0)} hint-eligible)`,
+);
 
 const rowOf = new Map(words.map((word, index) => [word, index]));
 const vectors = new Array<Float32Array | undefined>(words.length);
@@ -90,6 +103,7 @@ fs.writeFileSync(
 );
 const vectorBytes = Buffer.concat(vectors.map((vector) => Buffer.from(quantize(vector!).buffer)));
 fs.writeFileSync(path.join(devDir, 'vectors.bin'), vectorBytes);
+fs.writeFileSync(path.join(devDir, 'hints.bin'), Buffer.from(hints));
 console.error(`wrote dev bundle (${(vectorBytes.length / 1024 / 1024).toFixed(1)} MB)`);
 
 const lines: string[] = ['DELETE FROM vocab;', 'DELETE FROM puzzles;', 'DELETE FROM meta;'];
@@ -107,6 +121,7 @@ answers.forEach((answer, i) => {
 lines.push(`INSERT INTO meta (name, value) VALUES ('model','${EMBEDDING.model}');`);
 lines.push(`INSERT INTO meta (name, value) VALUES ('dim','${EMBEDDING.dim}');`);
 lines.push(`INSERT INTO meta (name, value) VALUES ('vocab_size','${words.length}');`);
+lines.push(`INSERT INTO meta (name, value) VALUES ('hint_mask','${Buffer.from(hints).toString('base64')}');`);
 
 const wordsJson = JSON.stringify(words);
 const META_CHUNK = 50_000;

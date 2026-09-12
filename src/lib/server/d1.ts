@@ -1,5 +1,5 @@
 import type { Puzzle, Store, Vocab } from './store.ts';
-import { parsePuzzle } from './store.ts';
+import { decodeBytes, parsePuzzle } from './store.ts';
 
 type BlobValue = ArrayBuffer | Uint8Array | number[];
 
@@ -39,11 +39,12 @@ export class D1Store implements Store {
     let promise = D1Store.vocabCache.get(this.db);
     if (!promise) {
       promise = (async () => {
-        const [wordsResult, dimValue, chunkResult] = await Promise.all([
+        const [wordsResult, dimValue, hintMask, chunkResult] = await Promise.all([
           this.db
             .prepare("SELECT value FROM meta WHERE name LIKE 'vocab_words_%' ORDER BY name")
             .all<{ value: string }>(),
           this.getMeta('dim'),
+          this.getMeta('hint_mask'),
           this.db.prepare('SELECT vec FROM vocab ORDER BY id').all<{ vec: ArrayBuffer }>(),
         ]);
         const wordsJson = (wordsResult.results ?? []).map((row) => row.value).join('');
@@ -59,7 +60,9 @@ export class D1Store implements Store {
           bytes.set(chunk, offset);
           offset += chunk.length;
         }
-        return { dim, words, index: new Map(words.map((w, i) => [w, i])), bytes };      })();
+        const hints = hintMask ? decodeBytes(hintMask) : new Uint8Array(words.length).fill(1);
+        return { dim, words, index: new Map(words.map((w, i) => [w, i])), bytes, hints };
+      })();
       D1Store.vocabCache.set(this.db, promise);
     }
     return promise;

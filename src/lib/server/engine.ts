@@ -68,6 +68,7 @@ export function nearestToDifference(vocab: Vocab, guessRow: number, answerRow: n
   let relaxed: { row: number; alpha: number } | null = null;
   for (let r = 0; r < vocab.words.length; r++) {
     if (r === guessRow || r === answerRow) continue;
+    if (!vocab.hints[r]) continue;
     if (isVariant(vocab.words[r], answer)) continue;
     const base = r * dim;
     let alpha = 0;
@@ -101,6 +102,7 @@ export function nearestToDifference(vocab: Vocab, guessRow: number, answerRow: n
   let bestSum: { row: number; dot: number } | null = null;
   for (let r = 0; r < vocab.words.length; r++) {
     if (r === guessRow || r === answerRow) continue;
+    if (!vocab.hints[r]) continue;
     if (isVariant(vocab.words[r], answer)) continue;
     const base = r * dim;
     let dot = 0;

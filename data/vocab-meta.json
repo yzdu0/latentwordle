@@ -1,0 +1,6 @@
+{
+  "model": "glove-wiki-gigaword-300",
+  "clean": 32022,
+  "proper": 2134,
+  "hintLimit": 15000
+}

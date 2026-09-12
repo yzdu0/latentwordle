@@ -12,17 +12,20 @@ export interface DevBundle {
 export class MemoryStore implements Store {
   private bundle: DevBundle;
   private bytes: Int8Array;
+  private hints: Uint8Array;
   private vocab: Vocab;
   private static cached: MemoryStore | null = null;
 
-  constructor(bundle: DevBundle, bytes: Int8Array) {
+  constructor(bundle: DevBundle, bytes: Int8Array, hints?: Uint8Array) {
     this.bundle = bundle;
     this.bytes = bytes;
+    this.hints = hints ?? new Uint8Array(bundle.words.length).fill(1);
     this.vocab = {
       dim: bundle.dim,
       words: bundle.words,
       index: new Map(bundle.words.map((w, i) => [w, i])),
       bytes,
+      hints: this.hints,
     };
   }
 
@@ -30,11 +33,18 @@ export class MemoryStore implements Store {
     if (MemoryStore.cached) return MemoryStore.cached;
     const indexPath = path.join(dir, 'index.json');
     const vectorsPath = path.join(dir, 'vectors.bin');
+    const hintsPath = path.join(dir, 'hints.bin');
     try {
       const bundle = JSON.parse(readFileSync(indexPath, 'utf8')) as DevBundle;
       const buf = readFileSync(vectorsPath);
       const bytes = new Int8Array(buf.buffer, buf.byteOffset, buf.byteLength);
-      MemoryStore.cached = new MemoryStore(bundle, bytes);
+      let hints: Uint8Array | undefined;
+      try {
+        hints = new Uint8Array(readFileSync(hintsPath));
+      } catch {
+        hints = undefined;
+      }
+      MemoryStore.cached = new MemoryStore(bundle, bytes, hints);
       return MemoryStore.cached;
     } catch {
       throw new Error(`dev store not found in ${dir}; run: npm run seed`);
