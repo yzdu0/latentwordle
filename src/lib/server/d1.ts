@@ -1,69 +1,64 @@
-import { dequantize, quantize } from '$lib/game/scoring.ts';
-import type { Anchors, PuzzleData, Store } from './store.ts';
+import type { Puzzle, Store, Vocab } from './store.ts';
 import { parsePuzzle } from './store.ts';
 
+type BlobValue = ArrayBuffer | Uint8Array | number[];
+
+function toInt8(value: BlobValue): Int8Array {
+  if (value instanceof Uint8Array) return new Int8Array(value.buffer, value.byteOffset, value.byteLength);
+  if (Array.isArray(value)) return Int8Array.from(value);
+  return new Int8Array(value);
+}
+
 export class D1Store implements Store {
-  private static anchorCache = new WeakMap<D1Database, Promise<Anchors | null>>();
+  private static vocabCache = new WeakMap<D1Database, Promise<Vocab>>();
 
   constructor(private db: D1Database) {}
 
-  async getVector(word: string): Promise<Float32Array | null> {
-    const row = await this.db.prepare('SELECT vec FROM words WHERE word = ?').bind(word).first<{ vec: ArrayBuffer }>();
-    if (!row) return null;
-    return dequantize(new Uint8Array(row.vec));
+  async getPuzzle(dayIndex: number): Promise<Puzzle | null> {
+    const row = await this.db
+      .prepare('SELECT answer FROM puzzles WHERE id = (? % (SELECT COUNT(*) FROM puzzles)) + 1')
+      .bind(dayIndex)
+      .first<{ answer: string }>();
+    return row ? parsePuzzle(row) : null;
   }
 
-  async putVector(word: string, vec: Float32Array): Promise<void> {
-    const bytes = quantize(vec);
-    await this.db
-      .prepare('INSERT OR REPLACE INTO words (word, vec) VALUES (?, ?)')
-      .bind(word, bytes.buffer)
-      .run();
+  async getPuzzles(): Promise<Puzzle[]> {
+    const result = await this.db.prepare('SELECT answer FROM puzzles ORDER BY id').all<{ answer: string }>();
+    return (result.results ?? []).map(parsePuzzle);
+  }
+
+  getVocab(): Promise<Vocab> {
+    let promise = D1Store.vocabCache.get(this.db);
+    if (!promise) {
+      promise = (async () => {
+        const [wordsResult, dimValue, chunkResult] = await Promise.all([
+          this.db
+            .prepare("SELECT value FROM meta WHERE name LIKE 'vocab_words_%' ORDER BY name")
+            .all<{ value: string }>(),
+          this.getMeta('dim'),
+          this.db.prepare('SELECT vec FROM vocab ORDER BY id').all<{ vec: ArrayBuffer }>(),
+        ]);
+        const wordsJson = (wordsResult.results ?? []).map((row) => row.value).join('');
+        if (!wordsJson || !dimValue) throw new Error('vocabulary meta missing; run the seed');
+        const words = JSON.parse(wordsJson) as string[];
+        const dim = Number(dimValue);
+        const chunks = chunkResult.results ?? [];
+        const chunkArrays = chunks.map((row) => toInt8(row.vec as BlobValue));
+        const total = chunkArrays.reduce((sum, chunk) => sum + chunk.length, 0);
+        const bytes = new Int8Array(total);
+        let offset = 0;
+        for (const chunk of chunkArrays) {
+          bytes.set(chunk, offset);
+          offset += chunk.length;
+        }
+        return { dim, words, index: new Map(words.map((w, i) => [w, i])), bytes };      })();
+      D1Store.vocabCache.set(this.db, promise);
+    }
+    return promise;
   }
 
   async getMeta(name: string): Promise<string | null> {
     const row = await this.db.prepare('SELECT value FROM meta WHERE name = ?').bind(name).first<{ value: string }>();
     return row?.value ?? null;
-  }
-
-  getAnchors(): Promise<Anchors | null> {
-    let promise = D1Store.anchorCache.get(this.db);
-    if (!promise) {
-      promise = this.db
-        .prepare('SELECT vec, count, dim FROM anchors ORDER BY id')
-        .all<{ vec: ArrayBuffer; count: number; dim: number }>()
-        .then((result) => {
-          const rows = result.results ?? [];
-          if (rows.length === 0) return null;
-          const { count, dim } = rows[0];
-          const bytes = new Uint8Array(count * dim);
-          let offset = 0;
-          for (const row of rows) {
-            const chunk = new Uint8Array(row.vec);
-            bytes.set(chunk, offset);
-            offset += chunk.length;
-          }
-          return { count, dim, bytes };
-        });
-      D1Store.anchorCache.set(this.db, promise);
-    }
-    return promise;
-  }
-
-  async getPuzzle(dayIndex: number): Promise<PuzzleData | null> {
-    const row = await this.db
-      .prepare(
-        'SELECT answer, concepts, ks FROM puzzles WHERE id = (? % (SELECT COUNT(*) FROM puzzles)) + 1',
-      )
-      .bind(dayIndex)
-      .first<{ answer: string; concepts: string; ks: string }>();
-    return row ? parsePuzzle(row) : null;
-  }
-
-  async getPuzzles(): Promise<PuzzleData[]> {
-    const result = await this.db
-      .prepare('SELECT answer, concepts, ks FROM puzzles ORDER BY id')
-      .all<{ answer: string; concepts: string; ks: string }>();
-    return (result.results ?? []).map(parsePuzzle);
   }
 }

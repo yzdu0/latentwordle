@@ -4,8 +4,7 @@ import type { EngineResult } from './engine.ts';
 import { dayIndexOf } from './dates.ts';
 import { getStore } from './platform.ts';
 import { randomPuzzle } from './random.ts';
-import type { PuzzleData } from './store.ts';
-import { decodeVector } from './store.ts';
+import type { Puzzle } from './store.ts';
 
 export async function scoreRequest(
   env: Env | undefined,
@@ -13,7 +12,7 @@ export async function scoreRequest(
   rawActions: unknown,
 ): Promise<EngineResult> {
   const store = getStore(env);
-  let puzzle: PuzzleData | null;
+  let puzzle: Puzzle | null;
 
   if (game.kind === 'daily') {
     const dayIndex = dayIndexOf(game.date);
@@ -29,9 +28,5 @@ export async function scoreRequest(
     return { ok: false, error: { error: 'no_puzzle' } };
   }
 
-  const meanEncoded = await store.getMeta('mean');
-  const mean = meanEncoded ? decodeVector(meanEncoded) : null;
-  const globalK = Number(await store.getMeta('global_k')) || 0.15;
-
-  return computeView({ store, ai: env?.AI, mean, globalK }, game, puzzle, rawActions);
+  return computeView({ store }, game, puzzle, rawActions);
 }

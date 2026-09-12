@@ -1,166 +1,118 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { EmbeddingStore } from '../spike/lib/embeddings.ts';
-import type { Backend, ModelKey } from '../spike/lib/embeddings.ts';
-import { contentWords } from '../spike/lib/vocab.ts';
+import { createGunzip } from 'node:zlib';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import readline from 'node:readline';
 import { EMBEDDING } from '../src/lib/game/config.ts';
-import { align, calibrationK, meanVector, quantize, subtractAndNormalize } from '../src/lib/game/scoring.ts';
-import { encodeVector } from '../src/lib/server/store.ts';
-
-interface SourcePuzzle {
-  answer: string;
-  concepts: string[];
-}
-
-interface SeededPuzzle extends SourcePuzzle {
-  ks: number[];
-}
+import { l2normalize, quantize } from '../src/lib/game/scoring.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
-const WORD_RE = /^[a-z]{3,15}$/;
 
 function argValue(flag: string): string | null {
   const hit = process.argv.find((a) => a.startsWith(`--${flag}=`));
   return hit ? hit.slice(flag.length + 3) : null;
 }
 
-const backend = (argValue('backend') ?? 'local') as Backend;
-const model = (argValue('model') ?? 'bge-base') as ModelKey;
-if (backend !== 'workers-ai') {
-  console.error('note: local vectors differ slightly from Workers AI; use --backend=workers-ai for production parity');
+async function ensureGlove(archive: string): Promise<void> {
+  if (fs.existsSync(archive)) return;
+  console.error(`downloading ${EMBEDDING.model} (~380 MB) to ${archive}`);
+  const res = await fetch(EMBEDDING.url);
+  if (!res.ok || !res.body) throw new Error(`download failed: ${res.status}`);
+  await pipeline(Readable.fromWeb(res.body as never), createWriteStream(archive));
 }
 
-function stdev(xs: number[]): number {
-  const m = xs.reduce((s, x) => s + x, 0) / xs.length;
-  return Math.sqrt(xs.reduce((s, x) => s + (x - m) * (x - m), 0) / (xs.length - 1));
-}
+const archive = argValue('glove') ?? path.join(ROOT, '.cache/glove-wiki-gigaword-300.gz');
+await ensureGlove(archive);
 
-function median(xs: number[]): number {
-  const sorted = [...xs].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-}
+const vocabulary = fs
+  .readFileSync(path.join(ROOT, 'data/vocab.txt'), 'utf8')
+  .split('\n')
+  .map((line) => line.trim())
+  .filter(Boolean);
+const answers = JSON.parse(fs.readFileSync(path.join(ROOT, 'data/answers.json'), 'utf8')) as string[];
 
-const source: SourcePuzzle[] = JSON.parse(fs.readFileSync(path.join(ROOT, 'data/puzzles.json'), 'utf8'));
-for (const puzzle of source) {
-  if (!WORD_RE.test(puzzle.answer)) throw new Error(`bad answer: ${puzzle.answer}`);
-  if (puzzle.concepts.length !== 5) throw new Error(`expected 5 concepts for ${puzzle.answer}`);
-  for (const concept of puzzle.concepts) {
-    if (!WORD_RE.test(concept)) throw new Error(`bad concept: ${concept}`);
-    if (concept === puzzle.answer) throw new Error(`concept equals answer: ${concept}`);
-  }
+const seen = new Set<string>();
+const words: string[] = [];
+for (const word of [...vocabulary, ...answers]) {
+  if (seen.has(word)) continue;
+  seen.add(word);
+  words.push(word);
 }
-
-const words = [...new Set([...contentWords(), ...source.flatMap((p) => [p.answer, ...p.concepts])])].sort();
 console.error(`vocabulary: ${words.length} words`);
 
-const store = EmbeddingStore.open(model, backend);
-await store.ensure(words, (done, total) => {
-  if (done === total || done % 2048 === 0) console.error(`embedded ${done}/${total}`);
+const rowOf = new Map(words.map((word, index) => [word, index]));
+const vectors = new Array<Float32Array | undefined>(words.length);
+let remaining = words.length;
+
+const rl = readline.createInterface({
+  input: createReadStream(archive).pipe(createGunzip()),
+  crlfDelay: Infinity,
 });
-
-const raw = words.map((w) => store.getOrThrow(w));
-const mean = meanVector(raw);
-const centered = raw.map((v) => subtractAndNormalize(v, mean));
-const row = new Map(words.map((w, i) => [w, i]));
-
-const seeded: SeededPuzzle[] = [];
-const allKs: number[] = [];
-const diagnostics: string[] = [];
-
-for (const puzzle of source) {
-  const answerVec = centered[row.get(puzzle.answer)!];
-  const ks: number[] = [];
-  const zs: number[] = [];
-  for (const concept of puzzle.concepts) {
-    const conceptVec = centered[row.get(concept)!];
-    const aligns = centered.map((v) => align(v, conceptVec));
-    const goal = align(answerVec, conceptVec);
-    const m = aligns.reduce((s, x) => s + x, 0) / aligns.length;
-    const sd = stdev(aligns);
-    ks.push(calibrationK(aligns, goal));
-    zs.push(sd > 0 ? (goal - m) / sd : 0);
+let header = true;
+for await (const line of rl) {
+  if (header) {
+    header = false;
+    continue;
   }
-  allKs.push(...ks);
-  const outliers = zs.filter((z) => Math.abs(z) >= 1).length;
-  diagnostics.push(
-    `${puzzle.answer.padEnd(13)} z=[${zs.map((z) => z.toFixed(2).padStart(5)).join(' ')}]  weak=${5 - outliers}`,
-  );
-  seeded.push({ ...puzzle, ks });
+  const space = line.indexOf(' ');
+  if (space <= 0) continue;
+  const word = line.slice(0, space);
+  const index = rowOf.get(word);
+  if (index === undefined || vectors[index]) continue;
+  const parts = line.slice(space + 1).split(' ');
+  const vector = new Float32Array(parts.length);
+  for (let j = 0; j < parts.length; j++) vector[j] = Number(parts[j]);
+  vectors[index] = l2normalize(vector);
+  remaining -= 1;
+  if (remaining === 0) break;
 }
 
-const globalK = median(allKs);
-console.error(`\naxis diagnostics (z of answer vs vocab; |z|>=1 is a strong axis):`);
-for (const line of diagnostics) console.error(`  ${line}`);
-console.error(`global K for custom concepts: ${globalK.toFixed(3)}`);
+const missing = words.filter((_, index) => !vectors[index]);
+if (missing.length > 0) {
+  throw new Error(`missing ${EMBEDDING.model} vectors for: ${missing.join(', ')}`);
+}
+if (vectors.some((vector) => vector!.length !== EMBEDDING.dim)) {
+  throw new Error(`unexpected vector dimension (expected ${EMBEDDING.dim})`);
+}
 
 const devDir = path.join(ROOT, '.cache/dev');
 fs.mkdirSync(devDir, { recursive: true });
-
-const anchorStride = Math.ceil(words.length / 1024);
-const anchorIndexes = words.map((_, i) => i).filter((i) => i % anchorStride === 0);
-const anchorBytes = Buffer.concat(anchorIndexes.map((i) => Buffer.from(quantize(centered[i]).buffer)));
-fs.writeFileSync(path.join(devDir, 'anchors.bin'), anchorBytes);
-
 fs.writeFileSync(
   path.join(devDir, 'index.json'),
   JSON.stringify({
     model: EMBEDDING.model,
     dim: EMBEDDING.dim,
     words,
-    mean: Array.from(mean),
-    globalK,
-    anchorCount: anchorIndexes.length,
-    puzzles: seeded,
+    puzzles: answers.map((answer) => ({ answer })),
   }),
 );
-const vectorBytes = Buffer.concat(centered.map((v) => Buffer.from(quantize(v).buffer)));
+const vectorBytes = Buffer.concat(vectors.map((vector) => Buffer.from(quantize(vector!).buffer)));
 fs.writeFileSync(path.join(devDir, 'vectors.bin'), vectorBytes);
-console.error(`wrote dev bundle (${anchorIndexes.length} anchors, ${words.length} vectors)`);
+console.error(`wrote dev bundle (${(vectorBytes.length / 1024 / 1024).toFixed(1)} MB)`);
 
-function hex(bytes: Int8Array): string {
-  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('hex').toUpperCase();
+const lines: string[] = ['DELETE FROM vocab;', 'DELETE FROM puzzles;', 'DELETE FROM meta;'];
+
+const CHUNK = 100;
+for (let start = 0, id = 1; start < words.length; start += CHUNK, id++) {
+  const slice = vectors.slice(start, start + CHUNK);
+  const blob = Buffer.concat(slice.map((vector) => Buffer.from(quantize(vector!).buffer)));
+  lines.push(`INSERT INTO vocab (id, vec) VALUES (${id},X'${blob.toString('hex').toUpperCase()}');`);
 }
 
-const lines: string[] = [
-  'DELETE FROM words;',
-  'DELETE FROM puzzles;',
-  'DELETE FROM meta;',
-  'DELETE FROM anchors;',
-];
-
-const wordRows: string[] = [];
-for (const [i, word] of words.entries()) {
-  wordRows.push(`('${word}',X'${hex(quantize(centered[i]))}')`);
-  if (wordRows.length === 40) {
-    lines.push(`INSERT INTO words (word, vec) VALUES ${wordRows.join(',')};`);
-    wordRows.length = 0;
-  }
-}
-if (wordRows.length) lines.push(`INSERT INTO words (word, vec) VALUES ${wordRows.join(',')};`);
-
-seeded.forEach((puzzle, i) => {
-  lines.push(
-    `INSERT INTO puzzles (id, answer, concepts, ks) VALUES (${i + 1},'${puzzle.answer}','${JSON.stringify(
-      puzzle.concepts,
-    )}','${JSON.stringify(puzzle.ks.map((k) => Number(k.toFixed(4))))}');`,
-  );
+answers.forEach((answer, i) => {
+  lines.push(`INSERT INTO puzzles (id, answer) VALUES (${i + 1},'${answer}');`);
 });
-
 lines.push(`INSERT INTO meta (name, value) VALUES ('model','${EMBEDDING.model}');`);
 lines.push(`INSERT INTO meta (name, value) VALUES ('dim','${EMBEDDING.dim}');`);
-lines.push(`INSERT INTO meta (name, value) VALUES ('global_k','${globalK.toFixed(4)}');`);
-lines.push(`INSERT INTO meta (name, value) VALUES ('mean','${encodeVector(mean)}');`);
+lines.push(`INSERT INTO meta (name, value) VALUES ('vocab_size','${words.length}');`);
 
-const anchorChunkRows = 48;
-const anchorChunkBytes = anchorChunkRows * EMBEDDING.dim;
-for (let offset = 0, id = 1; offset < anchorBytes.length; offset += anchorChunkBytes, id++) {
-  const chunk = anchorBytes.subarray(offset, Math.min(offset + anchorChunkBytes, anchorBytes.length));
-  lines.push(
-    `INSERT INTO anchors (id, vec, count, dim) VALUES (${id},X'${chunk.toString('hex').toUpperCase()}',${
-      anchorIndexes.length
-    },${EMBEDDING.dim});`,
-  );
+const wordsJson = JSON.stringify(words);
+const META_CHUNK = 50_000;
+for (let offset = 0, part = 0; offset < wordsJson.length; offset += META_CHUNK, part++) {
+  const chunk = wordsJson.slice(offset, offset + META_CHUNK);
+  lines.push(`INSERT INTO meta (name, value) VALUES ('vocab_words_${String(part).padStart(3, '0')}','${chunk}');`);
 }
 
 const seedPath = path.join(ROOT, '.cache/seed.sql');

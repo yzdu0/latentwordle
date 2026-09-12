@@ -1,47 +1,39 @@
-export type Direction = 'under' | 'over' | 'same';
+export type GameRef = { kind: 'daily'; date: string } | { kind: 'random'; seed: number };
 
-export interface AxisResult {
-  match: number;
-  dir: Direction;
+export type Action = { type: 'guess'; word: string } | { type: 'giveup' };
+
+export interface GameStart {
+  game: GameRef;
+  maxTurns: number;
 }
-
-export type Action = { type: 'guess'; word: string } | { type: 'swap'; slot: number; concept: string };
 
 export interface GuessEntry {
   type: 'guess';
   turn: number;
   word: string;
-  results: AxisResult[];
+  similarity: number;
+  clue: string;
+  multiplier: number | null;
+  sumWord: string;
+  sumSimilarity: number;
 }
 
-export interface SwapEntry {
-  type: 'swap';
+export interface GiveUpEntry {
+  type: 'giveup';
   turn: number;
-  slot: number;
-  from: string;
-  concept: string;
 }
 
-export type HistoryEntry = GuessEntry | SwapEntry;
-
-export type GameRef = { kind: 'daily'; date: string } | { kind: 'random'; seed: number };
-
-export interface GameStart {
-  game: GameRef;
-  maxTurns: number;
-  conceptSlots: number;
-  concepts: string[];
-}
+export type HistoryEntry = GuessEntry | GiveUpEntry;
 
 export interface GameView {
   game: GameRef;
   maxTurns: number;
   turnsUsed: number;
-  conceptSlots: number;
-  concepts: string[];
   history: HistoryEntry[];
   solved: boolean;
   revealed: boolean;
+  givenUp: boolean;
+  score: number;
   answer: string | null;
 }
 
@@ -49,8 +41,6 @@ export type GameErrorCode =
   | 'bad_request'
   | 'invalid_action'
   | 'not_a_word'
-  | 'unknown_concept'
-  | 'duplicate_concept'
   | 'action_limit'
   | 'game_over'
   | 'no_puzzle'

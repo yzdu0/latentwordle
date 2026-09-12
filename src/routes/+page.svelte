@@ -1,8 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import AxisCard from '$lib/components/AxisCard.svelte';
-  import { matchTone, TONE_EMOJI } from '$lib/game/presentation.ts';
-  import type { Action, AxisResult, GameRef, GameStart, GameView } from '$lib/game/types.ts';
+  import type { Action, GameRef, GameStart, GameView } from '$lib/game/types.ts';
 
   interface Stats {
     streak: number;
@@ -10,16 +8,16 @@
     lastDate: string | null;
     played: number;
     won: number;
+    score: number;
+    best: number;
   }
 
-  const STORAGE_KEY = 'latent:game:v1';
+  const STORAGE_KEY = 'latent:game:v3';
   const STATS_KEY = 'latent:stats:v1';
-  const EMPTY_STATS: Stats = { streak: 0, max: 0, lastDate: null, played: 0, won: 0 };
+  const EMPTY_STATS: Stats = { streak: 0, max: 0, lastDate: null, played: 0, won: 0, score: 0, best: 0 };
   const ERROR_TEXT: Record<string, string> = {
     not_a_word: 'Not a word I know — try another.',
-    unknown_concept: 'That concept is not available yet.',
-    duplicate_concept: 'That concept is already on the board.',
-    action_limit: 'No turns left.',
+    action_limit: 'No guesses left.',
     game_over: 'This game is over.',
     bad_request: 'That move did not make sense.',
   };
@@ -29,38 +27,22 @@
   let actions = $state<Action[]>([]);
   let stats = $state<Stats>(EMPTY_STATS);
   let guessInput = $state('');
-  let swapSlot = $state<number | null>(null);
-  let swapInput = $state('');
   let error = $state('');
   let busy = $state(true);
   let copied = $state(false);
+  let confirmingGiveUp = $state(false);
   let dialog = $state<HTMLDialogElement | null>(null);
 
   const ended = $derived(view ? view.solved || view.revealed : false);
   const turnsLeft = $derived(view ? view.maxTurns - view.turnsUsed : 0);
-  const latestResults = $derived.by(() => {
-    if (!view) return null as AxisResult[] | null;
-    for (let i = view.history.length - 1; i >= 0; i--) {
-      const entry = view.history[i];
-      if (entry.type === 'guess') return entry.results;
-    }
-    return null as AxisResult[] | null;
-  });
   const shareText = $derived.by(() => {
     if (!view) return '';
     const tag = view.game.kind === 'daily' ? view.game.date : 'random';
-    const lines = [`Latent ${tag} — ${view.solved ? view.turnsUsed : 'X'}/${view.maxTurns}`];
-    for (const entry of view.history) {
-      if (entry.type === 'guess') {
-        lines.push(entry.results.map((r) => TONE_EMOJI[matchTone(r.match)]).join(''));
-      } else {
-        lines.push('↺');
-      }
-    }
-    return lines.join('\n');
+    const result = view.solved ? `${view.turnsUsed}/${view.maxTurns}` : `X/${view.maxTurns}`;
+    return `LatentGuess ${tag} — ${result} · ${view.score} pts`;
   });
 
-  const cellTone = (match: number) => matchTone(match);
+  const simTone = (similarity: number) => (similarity >= 0.6 ? 'good' : similarity >= 0.35 ? 'mid' : 'bad');
 
   function previousDate(date: string): string {
     return new Date(Date.parse(`${date}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
@@ -69,7 +51,13 @@
   function recordStats() {
     if (!view || view.game.kind !== 'daily') return;
     if (!(view.solved || view.revealed) || stats.lastDate === view.game.date) return;
-    const next = { ...stats, played: stats.played + 1, lastDate: view.game.date };
+    const next = {
+      ...stats,
+      played: stats.played + 1,
+      lastDate: view.game.date,
+      score: stats.score + view.score,
+      best: Math.max(stats.best, view.score),
+    };
     if (view.solved) {
       next.won += 1;
       next.streak = stats.lastDate === previousDate(view.game.date) ? stats.streak + 1 : 1;
@@ -132,8 +120,6 @@
       view = null;
       actions = [];
       guessInput = '';
-      swapSlot = null;
-      swapInput = '';
       localStorage.removeItem(STORAGE_KEY);
       await post([]);
     } finally {
@@ -175,24 +161,6 @@
     if (await post([...actions, { type: 'guess', word }])) guessInput = '';
   }
 
-  async function submitSwap(event: SubmitEvent) {
-    event.preventDefault();
-    if (swapSlot === null || busy) return;
-    const concept = swapInput.trim().toLowerCase();
-    if (!concept) return;
-    if (await post([...actions, { type: 'swap', slot: swapSlot, concept }])) {
-      swapInput = '';
-      swapSlot = null;
-    }
-  }
-
-  function beginSwap(slot: number) {
-    if (busy || ended) return;
-    swapSlot = slot;
-    swapInput = '';
-    error = '';
-  }
-
   async function share() {
     try {
       await navigator.clipboard.writeText(shareText);
@@ -218,17 +186,11 @@
 
 <main>
   <header>
-    <h1>Latent</h1>
+    <div class="brand-block">
+      <h1 class="brand"><span class="brand-latent">Latent</span>Guess</h1>
+      <p class="tagline">find the hidden word by meaning</p>
+    </div>
     <div class="head-right">
-      {#if view}
-        <p class="meta">
-          {#if ended}
-            {view.solved ? `solved in ${view.turnsUsed}` : 'out of turns'}
-          {:else}
-            {turnsLeft} {turnsLeft === 1 ? 'turn' : 'turns'} left
-          {/if}
-        </p>
-      {/if}
       <button class="help" onclick={newGame} disabled={busy}>New game</button>
       <button class="help" onclick={() => dialog?.showModal()}>How to play</button>
     </div>
@@ -237,51 +199,60 @@
   {#if !view}
     <p class="muted loading">{error || 'Loading…'}</p>
   {:else}
-    <section class="axes" aria-label="Concepts">
-      {#each view.concepts as concept, i (concept)}
-        <AxisCard
-          label={concept}
-          result={latestResults?.[i] ?? null}
-          disabled={ended || busy}
-          onswap={() => beginSwap(i)}
-        />
-      {/each}
-    </section>
+    <div class="status">
+      <span class="meta">
+        {#if ended}
+          {view.solved ? `found it in ${view.turnsUsed}` : 'out of guesses'}
+        {:else}
+          {turnsLeft} {turnsLeft === 1 ? 'guess' : 'guesses'} left
+        {/if}
+      </span>
+      <div class="progress" aria-hidden="true">
+        <div class="progress-fill" style:width={`${(view.turnsUsed / view.maxTurns) * 100}%`}></div>
+      </div>
+    </div>
 
     {#if view.history.length}
       <p class="legend">
-        Each concept is a scale — the tick is the hidden word, the dot is your guess. Aim for the tick.
+        Your guess and its similarity, a hint with a multiplier, and how accurately the hint lands. Tap a
+        clue to try it.
       </p>
       <section class="board" aria-label="Guess history">
         {#each view.history as entry (entry.turn)}
-          {#if entry.type === 'guess'}
-            <div class="row">
-              <span class="word">{entry.word}</span>
-              <span class="cells">
-                {#each entry.results as result}
-                  <span class="cell {cellTone(result.match)}">{result.match}</span>
-                {/each}
-              </span>
-            </div>
-          {:else}
-            <div class="row swap">
-              <span>↺ {entry.concept} <span class="muted">replaces {entry.from}</span></span>
-            </div>
-          {/if}
+          <div class="row">
+            <span class="word">{entry.word}</span>
+            <span class="sim {simTone(entry.similarity)}" title="Direct similarity to the hidden word">
+              {Math.max(0, Math.round(entry.similarity * 100))}%
+            </span>
+            <span class="arrow" aria-hidden="true">→</span>
+            <button
+              class="clue"
+              onclick={() => (guessInput = entry.clue)}
+              title={`Use "${entry.clue}" as your next guess`}
+            >
+              {#if entry.multiplier !== null}<span class="mult">{entry.multiplier.toFixed(1)} ×</span>{/if}{entry.clue}
+            </button>
+            <span
+              class="sum"
+              title={`Closest word to the vector sum: "${entry.sumWord}" — ${Math.round(
+                entry.sumSimilarity * 100,
+              )}% similar to the hidden word`}
+            >
+              {Math.max(0, Math.round(entry.sumSimilarity * 100))}%
+            </span>
+          </div>
         {/each}
       </section>
+    {:else}
+      <p class="empty">Guess any word to begin. Every guess shows how close you are and which way to move.</p>
     {/if}
 
     {#if ended}
       <section class="over">
-        <p class="answer">
-          {#if view.solved}
-            Found it.
-          {:else}
-            The word was
-          {/if}
-          <strong>{view.answer}</strong>
+        <p class="answer-label">
+          {view.solved ? 'Found it' : 'The word was'}
         </p>
+        <p class="answer"><strong>{view.answer}</strong></p>
         <div class="over-actions">
           <button class="primary" onclick={share}>{copied ? 'Copied' : 'Share'}</button>
           <button class="ghost" onclick={newGame}>New game</button>
@@ -291,45 +262,23 @@
         </div>
       </section>
     {:else}
-      {#if swapSlot !== null}
-        <form class="entry" onsubmit={submitSwap}>
-          <span class="slot">replace <strong>{view.concepts[swapSlot]}</strong></span>
-          <input
-            bind:value={swapInput}
-            placeholder="new concept"
-            autocomplete="off"
-            autocapitalize="off"
-            spellcheck="false"
-            aria-label="New concept"
-            disabled={busy}
-          />
-          <button type="submit" disabled={busy || !swapInput.trim()}>Swap</button>
-          <button
-            type="button"
-            class="ghost"
-            onclick={() => {
-              swapSlot = null;
-              swapInput = '';
-            }}>Cancel</button
-          >
-        </form>
-      {:else}
-        <form class="entry" onsubmit={submitGuess}>
-          <input
-            bind:value={guessInput}
-            placeholder="guess a word"
-            autocomplete="off"
-            autocapitalize="off"
-            spellcheck="false"
-            aria-label="Guess a word"
-            disabled={busy}
-          />
-          <button type="submit" disabled={busy || !guessInput.trim()}>Guess</button>
-        </form>
-      {/if}
+      <form class="entry" onsubmit={submitGuess}>
+        <input
+          bind:value={guessInput}
+          placeholder="guess a word"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+          aria-label="Guess a word"
+          disabled={busy}
+        />
+        <button class="primary" type="submit" disabled={busy || !guessInput.trim()}>Guess</button>
+      </form>
       {#if error}<p class="error">{error}</p>{/if}
     {/if}
   {/if}
+
+  <footer class="foot">hints from GloVe · Wikipedia + Gigaword</footer>
 
   <dialog bind:this={dialog} aria-labelledby="howto-title">
     <div class="sheet">
@@ -337,39 +286,32 @@
         <h2 id="howto-title">How to play</h2>
         <button class="close" onclick={() => dialog?.close()} aria-label="Close">×</button>
       </div>
-      <p>Find the hidden word in 10 turns. Every guess is scored on five concepts.</p>
-      <p>
-        Each concept is a scale from “none of it” to “a lot of it”. The <strong>tick</strong> marks the
-        hidden word’s position. Your <strong>dot</strong> is your guess.
-      </p>
+      <p>Find the hidden word in 10 guesses. Every guess gives three signals:</p>
       <ul>
         <li>
-          The number is your match: <strong>100</strong> means your word sits exactly where the hidden word
-          sits on that concept.
+          <strong>A percentage</strong> — how similar your word is to the hidden word.
         </li>
         <li>
-          Dot <strong>left</strong> of the tick: your word has <strong>less</strong> of that concept than the
-          hidden word. Dot <strong>right</strong>: more.
+          <strong>A hint</strong> — a word and how much of it to take, like <strong>0.5 × summer</strong>.
+          Move half a step toward summer, not all the way.
         </li>
-        <li>Aim your next guess toward the tick.</li>
+        <li>
+          <strong>A hint score</strong> — the small percentage after the hint: how close the hint's vector
+          sum lands to the hidden word. Higher means a better-aimed hint.
+        </li>
       </ul>
-      <p class="example">
-        For example, if the water dot sits left of the tick, the hidden word is wetter than your guess — try
-        something more aquatic.
+      <p>
+        Example: if the hidden word were <em>winter</em>, guessing <em>snow</em> might answer
+        <strong>0.5 × summer</strong>. Tap a hint to try it, or use it as inspiration.
       </p>
       <p>
-        A turn is either a guess or a concept swap. Press <strong>↺</strong> on a concept to replace it with a
-        word of your own. The swap costs one turn, and the new concept is applied to every guess you have
-        already made — perfect for testing theories and narrowing the answer down.
+        Hints never name the hidden word or its close variants, and they get more oblique the further
+        away you are. Guess the exact hidden word to win.
       </p>
-      <p>
-        Guessing the exact hidden word wins. A close synonym can score 100 on every concept and still not be
-        the answer.
-      </p>
-      <p class="colors">
-        Colors: <span class="sample good">85+</span>
-        <span class="sample mid">60–84</span>
-        <span class="sample bad">under 60</span>
+      <p class="source">
+        Meanings come from <strong>GloVe</strong> word vectors trained on the 2014 Wikipedia dump plus the
+        Gigaword news archive — about 6 billion words of English. Words used in similar contexts end up
+        close together in that space.
       </p>
       <button class="primary done" onclick={() => dialog?.close()}>Got it</button>
     </div>
@@ -378,23 +320,54 @@
 
 <style>
   main {
-    max-width: 620px;
+    max-width: 600px;
     margin: 0 auto;
-    padding: 32px 20px 64px;
+    padding: 40px 22px 72px;
   }
 
   header {
     display: flex;
-    align-items: baseline;
+    align-items: flex-start;
     justify-content: space-between;
-    margin-bottom: 20px;
+    gap: 16px;
+    margin-bottom: 24px;
   }
 
-  h1 {
-    font-size: 18px;
-    font-weight: 600;
-    letter-spacing: -0.01em;
+  .brand-block {
+    min-width: 0;
+  }
+
+  .brand {
     margin: 0;
+    font-size: clamp(30px, 8vw, 40px);
+    font-weight: 800;
+    letter-spacing: -0.035em;
+    line-height: 1.05;
+  }
+
+  .brand-latent {
+    color: var(--brand);
+  }
+
+  .tagline {
+    margin: 6px 0 0;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .head-right {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding-top: 8px;
+    flex-shrink: 0;
+  }
+
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
   }
 
   .meta {
@@ -402,175 +375,22 @@
     font-size: 13px;
     color: var(--muted);
     font-variant-numeric: tabular-nums;
-  }
-
-  .axes {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
-    gap: 8px;
-  }
-
-  .legend {
-    font-size: 12px;
-    color: var(--muted);
-    margin: 16px 0 8px;
-  }
-
-  .board {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 8px 12px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-  }
-
-  .word {
-    font-weight: 500;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .cells {
-    display: flex;
-    gap: 4px;
     flex-shrink: 0;
   }
 
-  .cell {
-    width: 34px;
-    text-align: center;
-    font-size: 12px;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-    padding: 3px 0;
-    border-radius: 5px;
-    color: #fff;
-    background: var(--bad);
-  }
-
-  .cell.good {
-    background: var(--good);
-  }
-
-  .cell.mid {
-    background: var(--mid);
-  }
-
-  .row.swap {
-    background: none;
-    border-style: dashed;
-    color: var(--muted);
-    font-size: 13px;
-    padding: 6px 12px;
-  }
-
-  .entry {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    margin-top: 20px;
-  }
-
-  .entry input {
+  .progress {
     flex: 1;
-    min-width: 0;
-    padding: 10px 12px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface);
-    outline: none;
+    height: 5px;
+    border-radius: 3px;
+    background: var(--track);
+    overflow: hidden;
   }
 
-  .entry input:focus {
-    border-color: var(--accent);
-  }
-
-  button {
-    border: 1px solid var(--border);
-    background: var(--surface);
-    border-radius: 8px;
-    padding: 10px 16px;
-  }
-
-  button.primary {
-    background: var(--text);
-    color: var(--bg);
-    border-color: var(--text);
-    font-weight: 500;
-  }
-
-  button.ghost {
-    border-color: transparent;
-    color: var(--muted);
-    padding: 10px 8px;
-  }
-
-  button:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
-
-  .slot {
-    font-size: 13px;
-    color: var(--muted);
-    white-space: nowrap;
-  }
-
-  .over {
-    margin-top: 24px;
-    padding: 16px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-  }
-
-  .answer {
-    margin: 0 0 12px;
-  }
-
-  .answer strong {
-    font-weight: 600;
-  }
-
-  .over-actions {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .over-actions .muted {
-    font-size: 13px;
-  }
-
-  .error {
-    color: var(--bad);
-    font-size: 13px;
-    margin: 10px 0 0;
-  }
-
-  .loading {
-    padding: 24px 0;
-  }
-
-  .muted {
-    color: var(--muted);
-  }
-
-  .head-right {
-    display: flex;
-    align-items: baseline;
-    gap: 14px;
+  .progress-fill {
+    height: 100%;
+    border-radius: 3px;
+    background: linear-gradient(90deg, var(--brand), var(--accent));
+    transition: width 300ms ease;
   }
 
   .help {
@@ -583,17 +403,275 @@
     text-underline-offset: 3px;
   }
 
-  .help:hover {
+  .help:hover:not(:disabled) {
     color: var(--text);
+  }
+
+  .help:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .legend {
+    font-size: 12px;
+    color: var(--muted);
+    margin: 0 0 10px;
+  }
+
+  .empty {
+    margin: 30px 0 0;
+    text-align: center;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  .board {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    background: var(--surface);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    transition:
+      box-shadow 200ms ease,
+      transform 200ms ease;
+    animation: rise 260ms ease both;
+  }
+
+  .row:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+  }
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+  }
+
+  .word {
+    font-weight: 600;
+    font-size: 15px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .sim {
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+    color: var(--muted);
+  }
+
+  .sim.good {
+    color: var(--good);
+  }
+
+  .sim.mid {
+    color: var(--mid);
+  }
+
+  .sim.bad {
+    color: var(--bad);
+  }
+
+  .arrow {
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+
+  .clue {
+    margin-left: auto;
+    border: 0;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    padding: 5px 12px;
+    border-radius: 8px;
+    font-weight: 600;
+    color: var(--accent);
+    flex-shrink: 0;
+    transition: background 160ms ease;
+  }
+
+  .clue:hover {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+
+  .mult {
+    color: var(--muted);
+    font-weight: 600;
+    margin-right: 2px;
+  }
+
+  .sum {
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+
+  .entry {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-top: 24px;
+  }
+
+  .entry input {
+    flex: 1;
+    min-width: 0;
+    padding: 13px 18px;
+    border: 0;
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+    outline: none;
+    transition: box-shadow 160ms ease;
+  }
+
+  .entry input:focus {
+    box-shadow: var(--shadow-md);
+  }
+
+  .entry input::placeholder {
+    color: var(--muted);
+  }
+
+  .entry button,
+  .over button {
+    border: 0;
+    border-radius: var(--radius);
+    padding: 13px 22px;
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+    font-weight: 600;
+    transition:
+      filter 160ms ease,
+      box-shadow 160ms ease;
+  }
+
+  .entry button:hover:not(:disabled),
+  .over button:hover:not(:disabled) {
+    box-shadow: var(--shadow-md);
+  }
+
+  button.primary {
+    background: var(--text);
+    color: var(--bg);
+  }
+
+  button.primary:hover:not(:disabled) {
+    filter: brightness(1.2);
+  }
+
+  button.ghost {
+    background: none;
+    box-shadow: none;
+    color: var(--muted);
+    padding: 13px 10px;
+  }
+
+  button:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  button:focus-visible {
+    outline: none;
+  }
+
+  .help:focus-visible,
+  .clue:focus-visible,
+  .close:focus-visible {
+    color: var(--text);
+  }
+
+  .entry button:focus-visible,
+  .over button:focus-visible {
+    filter: brightness(0.9);
+  }
+
+  .over {
+    margin-top: 30px;
+    padding: 24px;
+    background: var(--surface);
+    border-radius: 18px;
+    box-shadow: var(--shadow-md);
+    text-align: center;
+  }
+
+  .answer-label {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+  }
+
+  .answer {
+    margin: 8px 0 18px;
+  }
+
+  .answer strong {
+    font-size: 30px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
+
+  .over-actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .over-actions .muted {
+    font-size: 13px;
+  }
+
+  .error {
+    color: var(--bad);
+    font-size: 13px;
+    margin: 12px 0 0;
+    text-align: center;
+  }
+
+  .loading {
+    padding: 28px 0;
+  }
+
+  .muted {
+    color: var(--muted);
+  }
+
+  .foot {
+    margin-top: 64px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted);
+    opacity: 0.75;
   }
 
   dialog {
     width: min(520px, calc(100vw - 40px));
     padding: 0;
-    border: 1px solid var(--border);
-    border-radius: 14px;
+    border: 0;
+    border-radius: 18px;
     background: var(--surface);
     color: var(--text);
+    box-shadow: var(--shadow-md);
   }
 
   dialog::backdrop {
@@ -615,53 +693,30 @@
 
   .sheet h2 {
     margin: 0;
-    font-size: 16px;
-    font-weight: 600;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
   }
 
-  .sheet p,
-  .sheet ul {
+  .sheet p {
     font-size: 14px;
     line-height: 1.55;
-    color: var(--text);
     margin: 10px 0;
   }
 
   .sheet ul {
+    margin: 10px 0;
     padding-left: 18px;
     display: flex;
     flex-direction: column;
     gap: 6px;
+    font-size: 14px;
+    line-height: 1.55;
   }
 
-  .example {
+  .source {
     color: var(--muted);
-    border-left: 2px solid var(--border);
-    padding-left: 12px;
-  }
-
-  .colors {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--muted);
-  }
-
-  .sample {
-    color: #fff;
-    font-size: 12px;
-    font-weight: 600;
-    padding: 2px 7px;
-    border-radius: 5px;
-    background: var(--bad);
-  }
-
-  .sample.good {
-    background: var(--good);
-  }
-
-  .sample.mid {
-    background: var(--mid);
+    font-size: 13px;
   }
 
   .close {
@@ -680,5 +735,32 @@
   .done {
     width: 100%;
     margin-top: 8px;
+  }
+
+  @media (max-width: 460px) {
+    header {
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .head-right {
+      padding-top: 0;
+    }
+
+    .brand {
+      font-size: 32px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .row,
+    .progress-fill,
+    .entry input,
+    .entry button,
+    .over button,
+    .clue {
+      animation: none;
+      transition: none;
+    }
   }
 </style>

@@ -1,146 +1,166 @@
 import { describe, expect, it } from 'vitest';
 import type { GameRef } from '$lib/game/types.ts';
-import type { Anchors, PuzzleData, Store } from './store.ts';
-import { calibrateCustomK, computeView } from './engine.ts';
-import { quantize } from '$lib/game/scoring.ts';
+import type { Puzzle, Store, Vocab } from './store.ts';
+import { clueSimilarityCap, computeView, isVariant, nearestToDifference } from './engine.ts';
+import { l2normalize, quantize } from '$lib/game/scoring.ts';
 
-class FakeStore implements Store {
-  private map = new Map<string, Float32Array>();
-  anchors: Anchors | null = null;
+class FakeVocabStore implements Store {
+  vocab: Vocab;
 
   constructor(entries: Record<string, number[]>) {
-    for (const [word, vec] of Object.entries(entries)) this.map.set(word, Float32Array.from(vec));
+    const words = Object.keys(entries);
+    const dim = entries[words[0]].length;
+    const bytes = new Int8Array(words.length * dim);
+    words.forEach((word, i) => {
+      const q = quantize(l2normalize(entries[word]));
+      bytes.set(new Uint8Array(q.buffer), i * dim);
+    });
+    this.vocab = { dim, words, index: new Map(words.map((w, i) => [w, i])), bytes };
   }
 
-  async getVector(word: string): Promise<Float32Array | null> {
-    return this.map.get(word) ?? null;
-  }
-
-  async putVector(word: string, vec: Float32Array): Promise<void> {
-    this.map.set(word, vec);
-  }
-
-  async getMeta(name: string): Promise<string | null> {
-    if (name === 'global_k') return '0.8';
-    if (name === 'model') return 'test';
+  async getPuzzle(): Promise<Puzzle | null> {
     return null;
   }
-
-  async getPuzzle(): Promise<PuzzleData | null> {
-    return null;
-  }
-
-  async getPuzzles(): Promise<PuzzleData[]> {
+  async getPuzzles(): Promise<Puzzle[]> {
     return [];
   }
-
-  async getAnchors(): Promise<Anchors | null> {
-    return this.anchors;
+  async getVocab(): Promise<Vocab> {
+    return this.vocab;
+  }
+  async getMeta(): Promise<string | null> {
+    return null;
   }
 }
 
-const concepts = ['animal', 'danger', 'water', 'speed', 'technology'];
-const puzzle: PuzzleData = { answer: 'shark', concepts, ks: [0.3, 0.3, 0.3, 0.3, 0.3] };
+const entries = {
+  cat: [1, 0, 0],
+  wolf: [0, 1, 0],
+  moon: [0, 0.6, 0.8],
+  forest: [0.2, 0.4, 0.9],
+  puppy: [0.2, 0.98, 0],
+  wolfs: [0.1, 0.99, 0],
+  zork: [-1, 0, 0],
+};
 
-function makeStore(): FakeStore {
-  return new FakeStore({
-    shark: [1, 0, 0],
-    animal: [1, 0, 0],
-    danger: [0, 0, 1],
-    water: [0, 1, 0],
-    speed: [0, 0, 1],
-    technology: [0, 0, 1],
-    fish: [0.8, 0.6, 0],
-    car: [0, 0, 1],
-    sea: [0, 1, 0],
-  });
-}
-
+const puzzle: Puzzle = { answer: 'wolf' };
 const game: GameRef = { kind: 'random', seed: 1 };
 
-async function run(store: FakeStore, actions: unknown) {
-  return computeView({ store, mean: null, globalK: 0.8 }, game, puzzle, actions);
+async function run(store: FakeVocabStore, actions: unknown) {
+  return computeView({ store }, game, puzzle, actions);
 }
 
+describe('isVariant', () => {
+  it('detects plurals and suffixed forms', () => {
+    expect(isVariant('shark', 'sharks')).toBe(true);
+    expect(isVariant('volcano', 'volcanoes')).toBe(true);
+    expect(isVariant('courage', 'courageous')).toBe(true);
+  });
+
+  it('leaves unrelated or short words alone', () => {
+    expect(isVariant('cat', 'cattle')).toBe(false);
+    expect(isVariant('shark', 'whale')).toBe(false);
+  });
+});
+
+describe('clueSimilarityCap', () => {
+  it('keeps far guesses cryptic and close guesses direct', () => {
+    expect(clueSimilarityCap(0)).toBe(0.5);
+    expect(clueSimilarityCap(0.1)).toBe(0.5);
+    expect(clueSimilarityCap(0.4)).toBeCloseTo(0.75);
+    expect(clueSimilarityCap(0.6)).toBe(0.9);
+    expect(clueSimilarityCap(0.95)).toBe(0.9);
+  });
+});
+
+describe('nearestToDifference', () => {
+  it('returns a scaled hint and skips near-answer words', () => {
+    const store = new FakeVocabStore(entries);
+    const clue = nearestToDifference(store.vocab, store.vocab.index.get('cat')!, store.vocab.index.get('wolf')!);
+    expect(clue.word).toBe('forest');
+    expect(clue.multiplier).toBe(0.2);
+  });
+
+  it('never returns the answer or a variant', () => {
+    const store = new FakeVocabStore(entries);
+    const clue = nearestToDifference(store.vocab, store.vocab.index.get('cat')!, store.vocab.index.get('wolf')!);
+    expect(clue.word).not.toBe('wolf');
+    expect(clue.word).not.toBe('wolfs');
+  });
+});
+
 describe('computeView', () => {
-  it('rescores earlier guesses on a swapped axis', async () => {
-    const result = await run(makeStore(), [
-      { type: 'guess', word: 'fish' },
-      { type: 'swap', slot: 0, concept: 'sea' },
-      { type: 'guess', word: 'car' },
+  it('returns a clue for each guess', async () => {
+    const result = await run(new FakeVocabStore(entries), [{ type: 'guess', word: 'cat' }]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.view.history).toEqual([
+      {
+        type: 'guess',
+        turn: 1,
+        word: 'cat',
+        similarity: 0,
+        clue: 'forest',
+        multiplier: 0.2,
+        sumWord: 'forest',
+        sumSimilarity: 0.402,
+      },
+    ]);
+  });
+
+  it('reports how close the vector-sum word lands to the answer', async () => {
+    const result = await run(new FakeVocabStore(entries), [{ type: 'guess', word: 'cat' }]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const entry = result.view.history[0];
+    expect(entry.sumWord).toBe('forest');
+    expect(entry.sumWord).not.toBe('wolf');
+    expect(entry.sumSimilarity).toBeCloseTo(0.402, 2);
+  });
+
+  it('reports the direct similarity of each guess', async () => {
+    const result = await run(new FakeVocabStore(entries), [
+      { type: 'guess', word: 'cat' },
+      { type: 'guess', word: 'moon' },
     ]);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-
-    expect(result.view.concepts).toEqual(['sea', 'danger', 'water', 'speed', 'technology']);
-    const [first, swap, second] = result.view.history;
-    expect(first.type).toBe('guess');
-    if (first.type !== 'guess') return;
-    expect(first.results).toHaveLength(5);
-    expect(first.results[0]).toEqual({ match: 25, dir: 'over' });
-    expect(swap.type).toBe('swap');
-    if (swap.type === 'swap') expect(swap.from).toBe('animal');
-    expect(second.type).toBe('guess');
+    expect(result.view.history[0].similarity).toBe(0);
+    expect(result.view.history[1].similarity).toBeCloseTo(0.6, 2);
   });
 
   it('keeps the answer hidden until solved', async () => {
-    const result = await run(makeStore(), [{ type: 'guess', word: 'fish' }]);
+    const result = await run(new FakeVocabStore(entries), [{ type: 'guess', word: 'cat' }]);
     expect(result.ok && result.view.answer).toBeNull();
-    expect(result.ok && result.view.solved).toBe(false);
   });
 
   it('reveals the answer on a correct guess', async () => {
-    const result = await run(makeStore(), [
-      { type: 'guess', word: 'fish' },
-      { type: 'guess', word: 'shark' },
+    const result = await run(new FakeVocabStore(entries), [
+      { type: 'guess', word: 'cat' },
+      { type: 'guess', word: 'wolf' },
     ]);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.view.solved).toBe(true);
-    expect(result.view.answer).toBe('shark');
-    const last = result.view.history.at(-1);
-    if (last?.type === 'guess') {
-      expect(last.results.every((r) => r.match === 100 && r.dir === 'same')).toBe(true);
-    }
+    expect(result.view.answer).toBe('wolf');
+    expect(result.view.history.at(-1)).toMatchObject({ word: 'wolf', clue: 'wolf', multiplier: null });
+    expect(result.view.history.at(-1)?.similarity).toBe(1);
+    expect(result.view.history.at(-1)?.sumWord).toBe('wolf');
+    expect(result.view.history.at(-1)?.sumSimilarity).toBe(1);
   });
 
-  it('rejects guesses outside the dictionary', async () => {
-    const result = await run(makeStore(), [{ type: 'guess', word: 'fish' }, { type: 'guess', word: 'tractor' }]);
+  it('rejects guesses outside the vocabulary', async () => {
+    const result = await run(new FakeVocabStore(entries), [
+      { type: 'guess', word: 'cat' },
+      { type: 'guess', word: 'zymurgy' },
+    ]);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatchObject({ error: 'not_a_word', actionIndex: 1 });
   });
 
-  it('rejects unknown custom concepts when embeddings are unavailable', async () => {
-    const result = await run(makeStore(), [{ type: 'guess', word: 'fish' }, { type: 'swap', slot: 1, concept: 'courage' }]);
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toMatchObject({ error: 'unknown_concept', actionIndex: 1 });
-  });
-
   it('marks the game revealed after the turn budget', async () => {
-    const actions = Array.from({ length: 10 }, () => ({ type: 'guess', word: 'fish' }));
-    const result = await run(makeStore(), actions);
+    const actions = Array.from({ length: 10 }, () => ({ type: 'guess', word: 'cat' }));
+    const result = await run(new FakeVocabStore(entries), actions);
     expect(result.ok && result.view.revealed).toBe(true);
-    expect(result.ok && result.view.answer).toBe('shark');
-  });
-});
-
-describe('calibrateCustomK', () => {
-  it('derives K from the anchor distribution', () => {
-    const rows = [
-      new Float32Array([1, 0, 0]),
-      new Float32Array([0.8, 0.6, 0]),
-      new Float32Array([0.6, 0.8, 0]),
-      new Float32Array([0, 1, 0]),
-    ];
-    const bytes = new Uint8Array(rows.length * 3);
-    rows.forEach((row, i) => bytes.set(new Uint8Array(quantize(row).buffer), i * 3));
-    const anchors: Anchors = { count: rows.length, dim: 3, bytes };
-    const k = calibrateCustomK(anchors, new Float32Array([1, 0, 0]), 1, 0.9);
-    expect(k).toBeGreaterThan(0.05);
-    expect(k).toBeLessThan(0.9);
-  });
-
-  it('falls back when no anchors exist', () => {
-    expect(calibrateCustomK(null, new Float32Array([1, 0, 0]), 1, 0.42)).toBe(0.42);
+    expect(result.ok && result.view.answer).toBe('wolf');
   });
 });
