@@ -3,7 +3,9 @@ import {
   CLUE_SIM_FLOOR,
   CLUE_SIM_MARGIN,
   MIN_CLUE_SIM,
+  VARIANT_SIM_MIN,
 } from '$lib/game/config.ts';
+import { stem } from '$lib/game/morphology.ts';
 import { MAX_ROUNDS, MAX_TURNS, replay, roundEnded } from '$lib/game/rules.ts';
 import type { GameError, GameRef, GameView, HistoryEntry, RoundSummary } from '$lib/game/types.ts';
 import type { Store, Vocab } from './store.ts';
@@ -26,9 +28,17 @@ export function clueSimilarityCap(similarity: number): number {
   return Math.min(CLUE_SIM_CEILING, Math.max(CLUE_SIM_FLOOR, similarity + CLUE_SIM_MARGIN));
 }
 
-export function isVariant(a: string, b: string): boolean {
+function isPrefixVariant(a: string, b: string): boolean {
   const [short, long] = a.length <= b.length ? [a, b] : [b, a];
   return short.length >= 4 && long.length - short.length <= 3 && long.startsWith(short);
+}
+
+export function isVariant(a: string, b: string): boolean {
+  return isPrefixVariant(a, b) || stem(a) === stem(b);
+}
+
+function related(vocab: Vocab, a: number, b: number): boolean {
+  return isPrefixVariant(vocab.words[a], vocab.words[b]) || vocab.stems[a] === vocab.stems[b];
 }
 
 function rowToFloats(vocab: Vocab, row: number): Float32Array {
@@ -52,7 +62,6 @@ function rowSimilarity(vocab: Vocab, a: number, b: number): number {
 
 export function nearestToDifference(vocab: Vocab, guessRow: number, answerRow: number): Clue {
   const dim = vocab.dim;
-  const answer = vocab.words[answerRow];
   const guess = rowToFloats(vocab, guessRow);
   const target = rowToFloats(vocab, answerRow);
   const delta = new Float32Array(dim);
@@ -69,7 +78,7 @@ export function nearestToDifference(vocab: Vocab, guessRow: number, answerRow: n
   for (let r = 0; r < vocab.words.length; r++) {
     if (r === guessRow || r === answerRow) continue;
     if (!vocab.hints[r]) continue;
-    if (isVariant(vocab.words[r], answer)) continue;
+    if (related(vocab, r, answerRow)) continue;
     const base = r * dim;
     let alpha = 0;
     let simAnswer = 0;
@@ -103,7 +112,7 @@ export function nearestToDifference(vocab: Vocab, guessRow: number, answerRow: n
   for (let r = 0; r < vocab.words.length; r++) {
     if (r === guessRow || r === answerRow) continue;
     if (!vocab.hints[r]) continue;
-    if (isVariant(vocab.words[r], answer)) continue;
+    if (related(vocab, r, answerRow)) continue;
     const base = r * dim;
     let dot = 0;
     for (let j = 0; j < dim; j++) dot += sum[j] * vocab.bytes[base + j];
@@ -124,15 +133,23 @@ export async function computeView(
   answers: string[],
   rawActions: unknown,
 ): Promise<EngineResult> {
-  const replayed = replay(rawActions, answers);
-  if (!replayed.ok) return replayed;
-  const state = replayed.state;
-
   const vocab = await ctx.store.getVocab();
   const answerRows = answers.map((answer) => vocab.index.get(answer));
   if (answerRows.some((row) => row === undefined)) {
     return { ok: false, error: { error: 'store_error', detail: 'answer missing from vocabulary' } };
   }
+
+  const matches = (guess: string, answer: string): boolean => {
+    if (guess === answer) return true;
+    const guessRow = vocab.index.get(guess);
+    const answerRow = vocab.index.get(answer);
+    if (guessRow === undefined || answerRow === undefined) return false;
+    return related(vocab, guessRow, answerRow) && rowSimilarity(vocab, guessRow, answerRow) >= VARIANT_SIM_MIN;
+  };
+
+  const replayed = replay(rawActions, answers, { matches });
+  if (!replayed.ok) return replayed;
+  const state = replayed.state;
 
   const results: RoundSummary[] = [];
   let score = 0;
@@ -169,7 +186,7 @@ export async function computeView(
       return { ok: false, error: { error: 'not_a_word', actionIndex: turn.actionIndex, detail: turn.word } };
     }
     const clue = nearestToDifference(vocab, guessRow, answerRow);
-    const isWin = turn.word === answers[round.index];
+    const isWin = matches(turn.word, answers[round.index]);
     const similarity = isWin ? 1 : clue.similarity;
     roundPoints += Math.max(0, Math.round(similarity * 100));
     history.push({

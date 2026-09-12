@@ -8,6 +8,7 @@ export interface Vocab {
   index: Map<string, number>;
   bytes: Int8Array;
   hints: Uint8Array;
+  stems: string[];
 }
 
 export interface Store {

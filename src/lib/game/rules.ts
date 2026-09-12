@@ -47,12 +47,16 @@ export function roundEnded(round: NormalizedRound, maxTurns = MAX_TURNS): boolea
   return round.solved || round.givenUp || round.turns.length >= maxTurns;
 }
 
-export function replay(
-  rawActions: unknown,
-  answers: string[],
-  maxTurns = MAX_TURNS,
-  rounds = MAX_ROUNDS,
-): ReplayResult {
+export interface ReplayOptions {
+  maxTurns?: number;
+  rounds?: number;
+  matches?: (guess: string, answer: string) => boolean;
+}
+
+export function replay(rawActions: unknown, answers: string[], options: ReplayOptions = {}): ReplayResult {
+  const maxTurns = options.maxTurns ?? MAX_TURNS;
+  const rounds = options.rounds ?? MAX_ROUNDS;
+  const matches = options.matches ?? ((guess: string, answer: string) => guess === answer);
   if (!Array.isArray(rawActions)) {
     return { ok: false, error: { error: 'bad_request', detail: 'actions must be an array' } };
   }
@@ -98,7 +102,7 @@ export function replay(
       return { ok: false, error: { error: 'invalid_action', actionIndex: i } };
     }
     round.turns.push({ type: 'guess', turn: round.turns.length + 1, word, actionIndex: i });
-    if (word === answers[round.index]) round.solved = true;
+    if (matches(word, answers[round.index])) round.solved = true;
     if ((round.solved || round.turns.length >= maxTurns) && round.index >= rounds - 1) {
       state.finished = true;
     }

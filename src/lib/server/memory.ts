@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { stem } from '$lib/game/morphology.ts';
 import type { Puzzle, Store, Vocab } from './store.ts';
 
 export interface DevBundle {
@@ -26,6 +27,7 @@ export class MemoryStore implements Store {
       index: new Map(bundle.words.map((w, i) => [w, i])),
       bytes,
       hints: this.hints,
+      stems: bundle.words.map(stem),
     };
   }
 

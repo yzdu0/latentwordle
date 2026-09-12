@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { GameRef } from '$lib/game/types.ts';
 import type { Puzzle, Store, Vocab } from './store.ts';
 import { clueSimilarityCap, computeView, isVariant, nearestToDifference } from './engine.ts';
+import { stem } from '$lib/game/morphology.ts';
 import { MAX_TURNS } from '$lib/game/rules.ts';
 import { l2normalize, quantize } from '$lib/game/scoring.ts';
 
@@ -17,7 +18,7 @@ class FakeVocabStore implements Store {
       bytes.set(new Uint8Array(q.buffer), i * dim);
     });
     const hints = Uint8Array.from(words, (word) => (!hintWords || hintWords.has(word) ? 1 : 0));
-    this.vocab = { dim, words, index: new Map(words.map((w, i) => [w, i])), bytes, hints };
+    this.vocab = { dim, words, index: new Map(words.map((w, i) => [w, i])), bytes, hints, stems: words.map(stem) };
   }
 
   async getPuzzle(): Promise<Puzzle | null> {
@@ -57,6 +58,7 @@ describe('isVariant', () => {
     expect(isVariant('shark', 'sharks')).toBe(true);
     expect(isVariant('volcano', 'volcanoes')).toBe(true);
     expect(isVariant('courage', 'courageous')).toBe(true);
+    expect(isVariant('employment', 'employed')).toBe(true);
   });
 
   it('leaves unrelated or short words alone', () => {
@@ -178,6 +180,28 @@ describe('computeView', () => {
     expect(result.view.history).toHaveLength(0);
     expect(result.view.results).toHaveLength(1);
     expect(result.view.roundEnded).toBe(false);
+  });
+
+  it('solves the round on a close form of the answer', async () => {
+    const result = await run(new FakeVocabStore(entries), [guess('wolfs')]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.view.roundEnded).toBe(true);
+    expect(result.view.roundAnswer).toBe('wolf');
+    expect(result.view.results[0]).toMatchObject({ answer: 'wolf', solved: true });
+  });
+
+  it('does not solve on a same-stem word with different meaning', async () => {
+    const store = new FakeVocabStore({
+      university: [1, 0, 0],
+      universal: [0, 1, 0],
+      filler: [0, 0, 1],
+    });
+    const result = await computeView({ store }, game, ['university'], [guess('universal')]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.view.roundEnded).toBe(false);
+    expect(result.view.roundAnswer).toBeNull();
   });
 
   it('handles giving up: reveals the word and keeps earned points', async () => {

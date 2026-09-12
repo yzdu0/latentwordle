@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { base } from '$app/paths';
   import type { Action, GameRef, GameStart, GameView } from '$lib/game/types.ts';
 
   interface Stats {
@@ -85,7 +86,7 @@
     busy = true;
     error = '';
     try {
-      const res = await fetch('/api/score', {
+      const res = await fetch(`${base}/api/score`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ game: start.game, actions: next }),
@@ -113,7 +114,7 @@
 
   async function init() {
     try {
-      const res = await fetch('/api/puzzle/today');
+      const res = await fetch(`${base}/api/puzzle/today`);
       if (!res.ok) {
         error = "Could not load today's puzzle.";
         return;
@@ -334,63 +335,38 @@
         <h2 id="howto-title">How to play</h2>
         <button class="close" onclick={() => dialog?.close()} aria-label="Close">×</button>
       </div>
-      <p>Find five hidden words a day — 10 guesses each. Every guess gives three signals:</p>
+      <p>Five hidden words a day with 10 guesses each. Every guess gives three signals:</p>
       <ul>
+        <li><strong>Similarity</strong>: how close your word is to the hidden word (100% = the same word).</li>
         <li>
-          <strong>A percentage</strong> — how similar your word is to the hidden word.
+          <strong>A hint</strong>: a word and how much of it to take.
         </li>
         <li>
-          <strong>A hint</strong> — a word and how much of it to take, like <strong>0.5 × summer</strong>.
-          Move half a step toward summer, not all the way.
-        </li>
-        <li>
-          <strong>A hint score</strong> — the small percentage after the hint: how close the hint's vector
-          sum lands to the hidden word. Higher means a better-aimed hint.
+          <strong>Hint accuracy</strong>: the small percentage after the hint: how close that nudge lands to
+          the hidden word.
         </li>
       </ul>
       <p>
-        Example: if the hidden word were <em>winter</em>, guessing <em>snow</em> might answer
-        <strong>0.5 × summer</strong>. Tap a hint to try it, or use it as inspiration.
+        Example: hidden word <em>winter</em>, guess <em>snow</em> → <strong>0.5 × summer</strong>. Tap a hint to try it.
       </p>
       <p>
-        Hints never name the hidden word or its close variants, and they get more oblique the further
-        away you are. Guess the exact word to move on to the next one.
+        Guessing the hidden word, or a close form of it like <em>employed</em> for <em>employment</em>, solves
+        the round. Each guess scores its similarity, and solving early adds up to 2,000 points. Give up to skip
+        a word, then share your five results.
+      </p>
+      <h3>How it works</h3>
+      <p>
+        Words are 300-dimension vectors from <strong>GloVe</strong>, trained on about 6 billion words of English
+        (2014 Wikipedia plus the Gigaword news archive). Similar vectors mean similar usage: <em>sea</em> and
+        <em>ocean</em> are close, and so are opposites like <em>hot</em> and <em>cold</em>. The percentage next
+        to a guess is its cosine similarity to the hidden word.
       </p>
       <p>
-        <strong>Scoring:</strong> every guess earns its similarity percentage, and solving early adds a
-        bonus of up to 2,000 points (2,000 for the first guess, then 1,800, and so on down to 200).
-        Stuck on a word? <strong>Give up</strong> to skip it and keep the points you earned. After all
-        five words, share your day.
-      </p>
-      <h3>How similarity works</h3>
-      <p>
-        Every word becomes <strong>300 numbers</strong> — its vector — learned by <strong>GloVe</strong> from
-        about 6 billion words of English (the 2014 Wikipedia dump plus the Gigaword news archive). A vector
-        records the kinds of sentences the word tends to appear in.
-      </p>
-      <p>
-        Two words are <strong>similar</strong> when their vectors point in the same direction. The percentage
-        shown next to a guess is their <strong>cosine similarity</strong>:
-      </p>
-      <ul>
-        <li>
-          <strong>100%</strong> — the same direction: the word itself, or one used in nearly identical
-          sentences.
-        </li>
-        <li>
-          <strong>0%</strong> — unrelated directions: the words share almost no context. Slightly negative
-          values are shown as 0%.
-        </li>
-      </ul>
-      <p>
-        Similarity is about <strong>usage, not spelling or dictionary meaning</strong>. <em>Sea</em> is close
-        to <em>ocean</em> because they appear in similar sentences. <em>Hot</em> and <em>cold</em> are also
-        fairly close — they are opposites, but they show up in the same kinds of sentences. A word with several
-        meanings sits between all of them.
-      </p>
-      <p class="source">
-        So a high percentage means “used the way the hidden word is used”, not “defined the same way”. The
-        percentages reflect the training text, including its quirks and biases.
+        Hints use vector arithmetic: the app builds the arrow <strong>Y − X</strong> from your guess X to the
+        hidden word Y, picks the word W pointing closest along it, and shows the best multiple. Hint accuracy
+        adds that multiple back onto your guess (<strong>X + 0.5 × W</strong>), finds the nearest real word to
+        that point, and scores it against Y. Hints never name the hidden word or close forms, and get sharper as
+        you get closer.
       </p>
       <button class="primary done" onclick={() => dialog?.close()}>Got it</button>
     </div>
@@ -860,11 +836,6 @@
     gap: 6px;
     font-size: 14px;
     line-height: 1.55;
-  }
-
-  .source {
-    color: var(--muted);
-    font-size: 13px;
   }
 
   .close {

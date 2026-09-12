@@ -1,3 +1,4 @@
+import { stem } from '$lib/game/morphology.ts';
 import type { Puzzle, Store, Vocab } from './store.ts';
 import { decodeBytes, parsePuzzle } from './store.ts';
 
@@ -61,7 +62,14 @@ export class D1Store implements Store {
           offset += chunk.length;
         }
         const hints = hintMask ? decodeBytes(hintMask) : new Uint8Array(words.length).fill(1);
-        return { dim, words, index: new Map(words.map((w, i) => [w, i])), bytes, hints };
+        return {
+          dim,
+          words,
+          index: new Map(words.map((w, i) => [w, i])),
+          bytes,
+          hints,
+          stems: words.map(stem),
+        };
       })();
       D1Store.vocabCache.set(this.db, promise);
     }
