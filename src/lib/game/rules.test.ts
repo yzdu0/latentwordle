@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_TURNS, normalizeWord, replay } from './rules.ts';
+import { MAX_ROUNDS, MAX_TURNS, normalizeWord, replay, roundEnded } from './rules.ts';
+
+const answers = ['shark', 'volcano', 'library', 'courage', 'honey'];
+const guess = (word: string) => ({ type: 'guess', word });
 
 describe('normalizeWord', () => {
   it('lowercases and trims', () => {
@@ -16,46 +19,98 @@ describe('normalizeWord', () => {
 });
 
 describe('replay', () => {
-  it('walks guesses in turn order', () => {
-    const result = replay([{ type: 'guess', word: 'Fish' }, { type: 'guess', word: 'ocean' }], 'shark');
+  it('tracks guesses in the current round', () => {
+    const result = replay([guess('Fish'), guess('ocean')], answers);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.state.turnsUsed).toBe(2);
-    expect(result.state.timeline).toEqual([
-      { type: 'guess', turn: 1, word: 'fish' },
-      { type: 'guess', turn: 2, word: 'ocean' },
+    expect(result.state.current.index).toBe(0);
+    expect(result.state.current.turns).toEqual([
+      { type: 'guess', turn: 1, word: 'fish', actionIndex: 0 },
+      { type: 'guess', turn: 2, word: 'ocean', actionIndex: 1 },
     ]);
-    expect(result.state.solved).toBe(false);
+    expect(roundEnded(result.state.current)).toBe(false);
+    expect(result.state.finished).toBe(false);
   });
 
-  it('marks the game solved on the answer', () => {
-    const result = replay([{ type: 'guess', word: 'shark' }], 'shark');
-    expect(result.ok && result.state.solved).toBe(true);
-    expect(result.ok && result.state.revealed).toBe(false);
+  it('ends the round on the right guess and waits for next', () => {
+    const result = replay([guess('shark')], answers);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.current.solved).toBe(true);
+    expect(roundEnded(result.state.current)).toBe(true);
+    expect(result.state.finished).toBe(false);
   });
 
-  it('reveals when guesses run out', () => {
-    const actions = Array.from({ length: MAX_TURNS }, () => ({ type: 'guess', word: 'fish' }));
-    const result = replay(actions, 'shark');
-    expect(result.ok && result.state.revealed).toBe(true);
+  it('advances to the next round on next', () => {
+    const result = replay([guess('shark'), { type: 'next' }], answers);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.rounds).toHaveLength(1);
+    expect(result.state.rounds[0].solved).toBe(true);
+    expect(result.state.current.index).toBe(1);
+    expect(result.state.current.turns).toHaveLength(0);
   });
 
-  it('rejects actions beyond the turn budget', () => {
-    const actions = Array.from({ length: MAX_TURNS + 1 }, () => ({ type: 'guess', word: 'fish' }));
-    const result = replay(actions, 'shark');
+  it('rejects guesses once a round has ended', () => {
+    const result = replay([guess('shark'), guess('fish')], answers);
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.error).toBe('action_limit');
+    if (!result.ok) expect(result.error).toEqual({ error: 'invalid_action', actionIndex: 1, detail: 'round over' });
   });
 
-  it('rejects actions after a solve', () => {
-    const result = replay([{ type: 'guess', word: 'shark' }, { type: 'guess', word: 'fish' }], 'shark');
+  it('rejects next before the round is over', () => {
+    const result = replay([{ type: 'next' }], answers);
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toEqual({ error: 'game_over', actionIndex: 1 });
+    if (!result.ok) expect(result.error.error).toBe('invalid_action');
+  });
+
+  it('ends the round after the guess budget', () => {
+    const actions = Array.from({ length: MAX_TURNS }, () => guess('fish'));
+    const result = replay(actions, answers);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.current.turns).toHaveLength(MAX_TURNS);
+    expect(roundEnded(result.state.current)).toBe(true);
+    expect(result.state.finished).toBe(false);
+  });
+
+  it('ends the round on give up', () => {
+    const result = replay([guess('fish'), { type: 'giveup' }], answers);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.current.givenUp).toBe(true);
+    expect(roundEnded(result.state.current)).toBe(true);
+  });
+
+  it('finishes the day after five rounds', () => {
+    const actions: unknown[] = [];
+    answers.forEach((answer, index) => {
+      actions.push(guess(answer));
+      if (index < answers.length - 1) actions.push({ type: 'next' });
+    });
+    const result = replay(actions, answers);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.finished).toBe(true);
+    expect(result.state.rounds).toHaveLength(MAX_ROUNDS - 1);
+    expect(result.state.current.index).toBe(MAX_ROUNDS - 1);
+    expect(result.state.current.solved).toBe(true);
+  });
+
+  it('rejects actions after the day is finished', () => {
+    const actions: unknown[] = [];
+    answers.forEach((answer, index) => {
+      actions.push(guess(answer));
+      if (index < answers.length - 1) actions.push({ type: 'next' });
+    });
+    actions.push(guess('shark'));
+    const result = replay(actions, answers);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.error).toBe('game_over');
   });
 
   it('rejects unknown action types and bad words', () => {
-    expect(replay([{ type: 'swap', slot: 0, concept: 'sea' }], 'shark').ok).toBe(false);
-    expect(replay([{ type: 'guess', word: 'ab' }], 'shark').ok).toBe(false);
-    expect(replay('nope', 'shark').ok).toBe(false);
+    expect(replay([{ type: 'swap', slot: 0, concept: 'sea' }], answers).ok).toBe(false);
+    expect(replay([guess('ab')], answers).ok).toBe(false);
+    expect(replay('nope', answers).ok).toBe(false);
   });
 });

@@ -4,9 +4,9 @@ import {
   CLUE_SIM_MARGIN,
   MIN_CLUE_SIM,
 } from '$lib/game/config.ts';
-import { MAX_TURNS, replay } from '$lib/game/rules.ts';
-import type { GameError, GameRef, GameView, HistoryEntry } from '$lib/game/types.ts';
-import type { Puzzle, Store, Vocab } from './store.ts';
+import { MAX_ROUNDS, MAX_TURNS, replay, roundEnded } from '$lib/game/rules.ts';
+import type { GameError, GameRef, GameView, HistoryEntry, RoundSummary } from '$lib/game/types.ts';
+import type { Store, Vocab } from './store.ts';
 
 export interface EngineContext {
   store: Store;
@@ -119,62 +119,99 @@ export function nearestToDifference(vocab: Vocab, guessRow: number, answerRow: n
 export async function computeView(
   ctx: EngineContext,
   game: GameRef,
-  puzzle: Puzzle,
+  answers: string[],
   rawActions: unknown,
 ): Promise<EngineResult> {
-  const replayed = replay(rawActions, puzzle.answer);
+  const replayed = replay(rawActions, answers);
   if (!replayed.ok) return replayed;
   const state = replayed.state;
 
   const vocab = await ctx.store.getVocab();
-  const answerRow = vocab.index.get(puzzle.answer);
-  if (answerRow === undefined) {
+  const answerRows = answers.map((answer) => vocab.index.get(answer));
+  if (answerRows.some((row) => row === undefined)) {
     return { ok: false, error: { error: 'store_error', detail: 'answer missing from vocabulary' } };
   }
 
-  const history: HistoryEntry[] = [];
-  for (let i = 0; i < state.timeline.length; i++) {
-    const action = state.timeline[i];
-    if (action.type === 'giveup') {
-      history.push({ type: 'giveup', turn: state.turnsUsed });
-      continue;
+  const results: RoundSummary[] = [];
+  let score = 0;
+
+  for (const round of state.rounds) {
+    let points = 0;
+    for (const turn of round.turns) {
+      const row = vocab.index.get(turn.word);
+      if (row === undefined) {
+        return { ok: false, error: { error: 'not_a_word', actionIndex: turn.actionIndex, detail: turn.word } };
+      }
+      points += Math.max(0, Math.round(rowSimilarity(vocab, row, answerRows[round.index]!) * 100));
     }
-    const guessRow = vocab.index.get(action.word);
+    const bonus = round.solved ? (MAX_TURNS - round.turns.length + 1) * 200 : 0;
+    const summary: RoundSummary = {
+      index: round.index,
+      answer: answers[round.index],
+      solved: round.solved,
+      givenUp: round.givenUp,
+      turnsUsed: round.turns.length,
+      score: points + bonus,
+    };
+    results.push(summary);
+    score += summary.score;
+  }
+
+  const round = state.current;
+  const answerRow = answerRows[round.index]!;
+  const history: HistoryEntry[] = [];
+  let roundPoints = 0;
+  for (const turn of round.turns) {
+    const guessRow = vocab.index.get(turn.word);
     if (guessRow === undefined) {
-      return { ok: false, error: { error: 'not_a_word', actionIndex: i, detail: action.word } };
+      return { ok: false, error: { error: 'not_a_word', actionIndex: turn.actionIndex, detail: turn.word } };
     }
     const clue = nearestToDifference(vocab, guessRow, answerRow);
-    const isWin = action.word === puzzle.answer;
+    const isWin = turn.word === answers[round.index];
+    const similarity = isWin ? 1 : clue.similarity;
+    roundPoints += Math.max(0, Math.round(similarity * 100));
     history.push({
       type: 'guess',
-      turn: action.turn,
-      word: action.word,
-      similarity: isWin ? 1 : clue.similarity,
-      clue: isWin ? puzzle.answer : clue.word,
+      turn: turn.turn,
+      word: turn.word,
+      similarity,
+      clue: isWin ? answers[round.index] : clue.word,
       multiplier: isWin ? null : clue.multiplier,
-      sumWord: isWin ? puzzle.answer : clue.sumWord,
+      sumWord: isWin ? answers[round.index] : clue.sumWord,
       sumSimilarity: isWin ? 1 : clue.sumSimilarity,
     });
   }
+  if (round.givenUp) history.push({ type: 'giveup', turn: round.turns.length });
 
-  let score = 0;
-  for (const entry of history) {
-    if (entry.type === 'guess') score += Math.max(0, Math.round(entry.similarity * 100));
+  const ended = roundEnded(round);
+  const bonus = round.solved ? (MAX_TURNS - round.turns.length + 1) * 200 : 0;
+  const roundScore = roundPoints + bonus;
+  if (ended) {
+    results.push({
+      index: round.index,
+      answer: answers[round.index],
+      solved: round.solved,
+      givenUp: round.givenUp,
+      turnsUsed: round.turns.length,
+      score: roundScore,
+    });
   }
-  if (state.solved) score += (MAX_TURNS - state.turnsUsed + 1) * 200;
+  score += ended ? roundScore : roundPoints;
 
   return {
     ok: true,
     view: {
       game,
       maxTurns: MAX_TURNS,
-      turnsUsed: state.turnsUsed,
+      rounds: MAX_ROUNDS,
+      round: round.index,
+      turnsUsed: round.turns.length,
+      finished: state.finished,
+      roundEnded: ended,
+      roundAnswer: ended ? answers[round.index] : null,
       history,
-      solved: state.solved,
-      revealed: state.revealed,
-      givenUp: state.givenUp,
+      results,
       score,
-      answer: state.solved || state.revealed ? puzzle.answer : null,
     },
   };
 }

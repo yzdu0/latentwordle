@@ -11,6 +11,7 @@ function toInt8(value: BlobValue): Int8Array {
 
 export class D1Store implements Store {
   private static vocabCache = new WeakMap<D1Database, Promise<Vocab>>();
+  private static puzzleCache = new WeakMap<D1Database, Promise<Puzzle[]>>();
 
   constructor(private db: D1Database) {}
 
@@ -22,9 +23,16 @@ export class D1Store implements Store {
     return row ? parsePuzzle(row) : null;
   }
 
-  async getPuzzles(): Promise<Puzzle[]> {
-    const result = await this.db.prepare('SELECT answer FROM puzzles ORDER BY id').all<{ answer: string }>();
-    return (result.results ?? []).map(parsePuzzle);
+  getPuzzles(): Promise<Puzzle[]> {
+    let promise = D1Store.puzzleCache.get(this.db);
+    if (!promise) {
+      promise = this.db
+        .prepare('SELECT answer FROM puzzles ORDER BY id')
+        .all<{ answer: string }>()
+        .then((result) => (result.results ?? []).map(parsePuzzle));
+      D1Store.puzzleCache.set(this.db, promise);
+    }
+    return promise;
   }
 
   getVocab(): Promise<Vocab> {

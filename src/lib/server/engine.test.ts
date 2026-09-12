@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { GameRef } from '$lib/game/types.ts';
 import type { Puzzle, Store, Vocab } from './store.ts';
 import { clueSimilarityCap, computeView, isVariant, nearestToDifference } from './engine.ts';
+import { MAX_TURNS } from '$lib/game/rules.ts';
 import { l2normalize, quantize } from '$lib/game/scoring.ts';
 
 class FakeVocabStore implements Store {
@@ -42,11 +43,12 @@ const entries = {
   zork: [-1, 0, 0],
 };
 
-const puzzle: Puzzle = { answer: 'wolf' };
+const answers = ['wolf', 'moon', 'cat', 'forest', 'puppy'];
 const game: GameRef = { kind: 'random', seed: 1 };
+const guess = (word: string) => ({ type: 'guess', word });
 
 async function run(store: FakeVocabStore, actions: unknown) {
-  return computeView({ store }, game, puzzle, actions);
+  return computeView({ store }, game, answers, actions);
 }
 
 describe('isVariant', () => {
@@ -90,9 +92,12 @@ describe('nearestToDifference', () => {
 
 describe('computeView', () => {
   it('returns a clue for each guess', async () => {
-    const result = await run(new FakeVocabStore(entries), [{ type: 'guess', word: 'cat' }]);
+    const result = await run(new FakeVocabStore(entries), [guess('cat')]);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
+    expect(result.view.round).toBe(0);
+    expect(result.view.turnsUsed).toBe(1);
+    expect(result.view.roundEnded).toBe(false);
     expect(result.view.history).toEqual([
       {
         type: 'guess',
@@ -107,60 +112,86 @@ describe('computeView', () => {
     ]);
   });
 
-  it('reports how close the vector-sum word lands to the answer', async () => {
-    const result = await run(new FakeVocabStore(entries), [{ type: 'guess', word: 'cat' }]);
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    const entry = result.view.history[0];
-    expect(entry.sumWord).toBe('forest');
-    expect(entry.sumWord).not.toBe('wolf');
-    expect(entry.sumSimilarity).toBeCloseTo(0.402, 2);
-  });
-
   it('reports the direct similarity of each guess', async () => {
-    const result = await run(new FakeVocabStore(entries), [
-      { type: 'guess', word: 'cat' },
-      { type: 'guess', word: 'moon' },
-    ]);
+    const result = await run(new FakeVocabStore(entries), [guess('cat'), guess('moon')]);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.view.history[0].similarity).toBe(0);
-    expect(result.view.history[1].similarity).toBeCloseTo(0.6, 2);
+    const [first, second] = result.view.history;
+    expect(first.type).toBe('guess');
+    expect(second.type).toBe('guess');
+    if (first.type !== 'guess' || second.type !== 'guess') return;
+    expect(first.similarity).toBe(0);
+    expect(second.similarity).toBeCloseTo(0.6, 2);
   });
 
-  it('keeps the answer hidden until solved', async () => {
-    const result = await run(new FakeVocabStore(entries), [{ type: 'guess', word: 'cat' }]);
-    expect(result.ok && result.view.answer).toBeNull();
+  it('keeps the answer hidden while the round is live', async () => {
+    const result = await run(new FakeVocabStore(entries), [guess('cat')]);
+    expect(result.ok && result.view.roundAnswer).toBeNull();
   });
 
-  it('reveals the answer on a correct guess', async () => {
-    const result = await run(new FakeVocabStore(entries), [
-      { type: 'guess', word: 'cat' },
-      { type: 'guess', word: 'wolf' },
-    ]);
+  it('reveals the answer and scores the round when solved', async () => {
+    const result = await run(new FakeVocabStore(entries), [guess('cat'), guess('wolf')]);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.view.solved).toBe(true);
-    expect(result.view.answer).toBe('wolf');
-    expect(result.view.history.at(-1)).toMatchObject({ word: 'wolf', clue: 'wolf', multiplier: null });
-    expect(result.view.history.at(-1)?.similarity).toBe(1);
-    expect(result.view.history.at(-1)?.sumWord).toBe('wolf');
-    expect(result.view.history.at(-1)?.sumSimilarity).toBe(1);
+    expect(result.view.roundEnded).toBe(true);
+    expect(result.view.finished).toBe(false);
+    expect(result.view.roundAnswer).toBe('wolf');
+    expect(result.view.results).toHaveLength(1);
+    expect(result.view.results[0]).toMatchObject({ answer: 'wolf', solved: true, turnsUsed: 2 });
+    expect(result.view.score).toBe(100 + (MAX_TURNS - 2 + 1) * 200);
+    const last = result.view.history.at(-1);
+    if (last?.type !== 'guess') return;
+    expect(last.clue).toBe('wolf');
+    expect(last.similarity).toBe(1);
+    expect(last.sumSimilarity).toBe(1);
+  });
+
+  it('moves to the next round', async () => {
+    const result = await run(new FakeVocabStore(entries), [guess('wolf'), { type: 'next' }]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.view.round).toBe(1);
+    expect(result.view.history).toHaveLength(0);
+    expect(result.view.results).toHaveLength(1);
+    expect(result.view.roundEnded).toBe(false);
+  });
+
+  it('handles giving up: reveals the word and keeps earned points', async () => {
+    const result = await run(new FakeVocabStore(entries), [guess('moon'), { type: 'giveup' }]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.view.roundEnded).toBe(true);
+    expect(result.view.roundAnswer).toBe('wolf');
+    expect(result.view.results[0]).toMatchObject({ answer: 'wolf', solved: false, givenUp: true });
+    expect(result.view.score).toBe(60);
+    expect(result.view.history.at(-1)).toEqual({ type: 'giveup', turn: 1 });
   });
 
   it('rejects guesses outside the vocabulary', async () => {
-    const result = await run(new FakeVocabStore(entries), [
-      { type: 'guess', word: 'cat' },
-      { type: 'guess', word: 'zymurgy' },
-    ]);
+    const result = await run(new FakeVocabStore(entries), [guess('cat'), guess('zymurgy')]);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatchObject({ error: 'not_a_word', actionIndex: 1 });
   });
 
-  it('marks the game revealed after the turn budget', async () => {
-    const actions = Array.from({ length: 10 }, () => ({ type: 'guess', word: 'cat' }));
+  it('ends the round after the guess budget', async () => {
+    const actions = Array.from({ length: MAX_TURNS }, () => guess('cat'));
     const result = await run(new FakeVocabStore(entries), actions);
-    expect(result.ok && result.view.revealed).toBe(true);
-    expect(result.ok && result.view.answer).toBe('wolf');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.view.roundEnded).toBe(true);
+    expect(result.view.finished).toBe(false);
+    expect(result.view.roundAnswer).toBe('wolf');
+  });
+
+  it('rejects actions after the day is finished', async () => {
+    const actions: unknown[] = [];
+    answers.forEach((answer, index) => {
+      actions.push(guess(answer));
+      if (index < answers.length - 1) actions.push({ type: 'next' });
+    });
+    actions.push(guess('wolf'));
+    const result = await run(new FakeVocabStore(entries), actions);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.error).toBe('game_over');
   });
 });

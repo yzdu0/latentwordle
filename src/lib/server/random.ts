@@ -1,4 +1,5 @@
-import type { Puzzle, Store } from './store.ts';
+import { MAX_ROUNDS } from '$lib/game/rules.ts';
+import type { Store } from './store.ts';
 
 export function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
@@ -11,9 +12,17 @@ export function mulberry32(seed: number): () => number {
   };
 }
 
-export async function randomPuzzle(store: Store, seed: number): Promise<Puzzle | null> {
+export async function randomAnswers(store: Store, seed: number): Promise<string[] | null> {
   const puzzles = await store.getPuzzles();
-  if (puzzles.length === 0) return null;
+  if (puzzles.length < MAX_ROUNDS) return null;
   const rng = mulberry32(seed);
-  return puzzles[Math.floor(rng() * puzzles.length)];
+  const used = new Set<number>();
+  const answers: string[] = [];
+  while (answers.length < MAX_ROUNDS) {
+    const index = Math.floor(rng() * puzzles.length);
+    if (used.has(index)) continue;
+    used.add(index);
+    answers.push(puzzles[index].answer);
+  }
+  return answers;
 }

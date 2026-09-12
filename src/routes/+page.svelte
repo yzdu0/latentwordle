@@ -33,13 +33,18 @@
   let confirmingGiveUp = $state(false);
   let dialog = $state<HTMLDialogElement | null>(null);
 
-  const ended = $derived(view ? view.solved || view.revealed : false);
-  const turnsLeft = $derived(view ? view.maxTurns - view.turnsUsed : 0);
+  const roundDone = $derived(view ? view.roundEnded : false);
+  const dayDone = $derived(view ? view.finished : false);
+  const guessesLeft = $derived(view ? view.maxTurns - view.turnsUsed : 0);
+  const roundResults = $derived(
+    view ? [...view.results].sort((a, b) => a.index - b.index) : [],
+  );
+  const currentResult = $derived(roundResults.find((result) => result.index === view?.round) ?? null);
   const shareText = $derived.by(() => {
     if (!view) return '';
     const tag = view.game.kind === 'daily' ? view.game.date : 'random';
-    const result = view.solved ? `${view.turnsUsed}/${view.maxTurns}` : `X/${view.maxTurns}`;
-    return `LatentGuess ${tag} — ${result} · ${view.score} pts`;
+    const marks = roundResults.map((r) => (r.solved ? `🟩${r.turnsUsed}` : '🟥X')).join(' ');
+    return `LatentGuess ${tag}\n${marks} · ${view.score} pts`;
   });
 
   const simTone = (similarity: number) => (similarity >= 0.6 ? 'good' : similarity >= 0.35 ? 'mid' : 'bad');
@@ -49,8 +54,8 @@
   }
 
   function recordStats() {
-    if (!view || view.game.kind !== 'daily') return;
-    if (!(view.solved || view.revealed) || stats.lastDate === view.game.date) return;
+    if (!view || view.game.kind !== 'daily' || !view.finished) return;
+    if (stats.lastDate === view.game.date) return;
     const next = {
       ...stats,
       played: stats.played + 1,
@@ -58,7 +63,8 @@
       score: stats.score + view.score,
       best: Math.max(stats.best, view.score),
     };
-    if (view.solved) {
+    const perfect = view.results.length > 0 && view.results.every((result) => result.solved);
+    if (perfect) {
       next.won += 1;
       next.streak = stats.lastDate === previousDate(view.game.date) ? stats.streak + 1 : 1;
       next.max = Math.max(next.max, next.streak);
@@ -97,38 +103,16 @@
     }
   }
 
-  async function fetchStart(game: GameRef): Promise<GameStart | null> {
-    const url =
-      game.kind === 'daily'
-        ? `/api/puzzle/today?date=${encodeURIComponent(game.date)}`
-        : `/api/puzzle/random?seed=${game.seed}`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    return (await res.json()) as GameStart;
-  }
-
-  async function newGame() {
-    busy = true;
-    error = '';
-    try {
-      const res = await fetch('/api/puzzle/random');
-      if (!res.ok) {
-        error = 'Could not start a new game.';
-        return;
-      }
-      start = (await res.json()) as GameStart;
-      view = null;
-      actions = [];
-      guessInput = '';
-      localStorage.removeItem(STORAGE_KEY);
-      await post([]);
-    } finally {
-      busy = false;
-    }
-  }
-
   async function init() {
     try {
+      const res = await fetch('/api/puzzle/today');
+      if (!res.ok) {
+        error = "Could not load today's puzzle.";
+        return;
+      }
+      const today = (await res.json()) as GameStart;
+      start = today;
+
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         let parsed: { game?: GameRef; actions?: Action[] } | null = null;
@@ -137,18 +121,15 @@
         } catch {
           parsed = null;
         }
-        if (parsed?.game) {
-          const restored = await fetchStart(parsed.game);
-          if (restored) {
-            start = restored;
-            actions = Array.isArray(parsed.actions) ? parsed.actions : [];
-            await post(actions);
-            return;
-          }
+        const savedGame = parsed?.game;
+        const savedActions = parsed?.actions;
+        const savedDate = savedGame?.kind === 'daily' ? savedGame.date : null;
+        const todayDate = today.game.kind === 'daily' ? today.game.date : null;
+        if (savedDate === todayDate && Array.isArray(savedActions)) {
+          actions = savedActions;
         }
-        localStorage.removeItem(STORAGE_KEY);
       }
-      await newGame();
+      await post(actions);
     } finally {
       busy = false;
     }
@@ -157,8 +138,20 @@
   async function submitGuess(event: SubmitEvent) {
     event.preventDefault();
     const word = guessInput.trim().toLowerCase();
-    if (!word || busy || ended) return;
+    if (!word || busy || roundDone || dayDone) return;
+    confirmingGiveUp = false;
     if (await post([...actions, { type: 'guess', word }])) guessInput = '';
+  }
+
+  async function giveUp() {
+    if (busy || roundDone || dayDone) return;
+    confirmingGiveUp = false;
+    await post([...actions, { type: 'giveup' }]);
+  }
+
+  async function nextWord() {
+    if (busy || !roundDone || dayDone) return;
+    await post([...actions, { type: 'next' }]);
   }
 
   async function share() {
@@ -191,7 +184,6 @@
       <p class="tagline">find the hidden word by meaning</p>
     </div>
     <div class="head-right">
-      <button class="help" onclick={newGame} disabled={busy}>New game</button>
       <button class="help" onclick={() => dialog?.showModal()}>How to play</button>
     </div>
   </header>
@@ -201,16 +193,34 @@
   {:else}
     <div class="status">
       <span class="meta">
-        {#if ended}
-          {view.solved ? `found it in ${view.turnsUsed}` : 'out of guesses'}
-        {:else}
-          {turnsLeft} {turnsLeft === 1 ? 'guess' : 'guesses'} left
-        {/if}
+        Round {view.round + 1}/{view.rounds}
+        {#if !roundDone}· {guessesLeft} {guessesLeft === 1 ? 'guess' : 'guesses'} left{/if}
       </span>
       <div class="progress" aria-hidden="true">
         <div class="progress-fill" style:width={`${(view.turnsUsed / view.maxTurns) * 100}%`}></div>
       </div>
+      <span class="meta score">{view.score} pts</span>
     </div>
+
+    {#if roundResults.length}
+      <div class="rounds" aria-label="Finished words">
+        {#each roundResults as result (result.index)}
+          <span
+            class="round-chip {result.solved ? 'good' : 'bad'}"
+            title={`${result.answer} — ${result.solved
+              ? `solved in ${result.turnsUsed}`
+              : result.givenUp
+                ? 'gave up'
+                : 'out of guesses'} · ${result.score} pts`}
+          >
+            <strong>{result.answer}</strong>
+            <span class="round-meta">
+              {result.solved ? `${result.turnsUsed}/${view.maxTurns}` : result.givenUp ? 'gave up' : `X/${view.maxTurns}`}
+            </span>
+          </span>
+        {/each}
+      </div>
+    {/if}
 
     {#if view.history.length}
       <p class="legend">
@@ -218,47 +228,62 @@
         clue to try it.
       </p>
       <section class="board" aria-label="Guess history">
-        {#each view.history as entry (entry.turn)}
-          <div class="row">
-            <span class="word">{entry.word}</span>
-            <span class="sim {simTone(entry.similarity)}" title="Direct similarity to the hidden word">
-              {Math.max(0, Math.round(entry.similarity * 100))}%
-            </span>
-            <span class="arrow" aria-hidden="true">→</span>
-            <button
-              class="clue"
-              onclick={() => (guessInput = entry.clue)}
-              title={`Use "${entry.clue}" as your next guess`}
-            >
-              {#if entry.multiplier !== null}<span class="mult">{entry.multiplier.toFixed(1)} ×</span>{/if}{entry.clue}
-            </button>
-            <span
-              class="sum"
-              title={`Closest word to the vector sum: "${entry.sumWord}" — ${Math.round(
-                entry.sumSimilarity * 100,
-              )}% similar to the hidden word`}
-            >
-              {Math.max(0, Math.round(entry.sumSimilarity * 100))}%
-            </span>
-          </div>
+        {#each view.history as entry, i (i)}
+          {#if entry.type === 'guess'}
+            {@const guess = entry}
+            <div class="row">
+              <span class="word">{guess.word}</span>
+              <span class="sim {simTone(guess.similarity)}" title="Direct similarity to the hidden word">
+                {Math.max(0, Math.round(guess.similarity * 100))}%
+              </span>
+              <span class="arrow" aria-hidden="true">→</span>
+              <button
+                class="clue"
+                onclick={() => (guessInput = guess.clue)}
+                title={`Use "${guess.clue}" as your next guess`}
+              >
+                {#if guess.multiplier !== null}<span class="mult">{guess.multiplier.toFixed(1)} ×</span>{/if}{guess.clue}
+              </button>
+              <span
+                class="sum"
+                title={`Closest word to the vector sum: "${guess.sumWord}" — ${Math.round(
+                  guess.sumSimilarity * 100,
+                )}% similar to the hidden word`}
+              >
+                {Math.max(0, Math.round(guess.sumSimilarity * 100))}%
+              </span>
+            </div>
+          {:else}
+            <div class="row giveup-row">
+              <span class="muted">gave up</span>
+            </div>
+          {/if}
         {/each}
       </section>
-    {:else}
+    {:else if !roundDone}
       <p class="empty">Guess any word to begin. Every guess shows how close you are and which way to move.</p>
     {/if}
 
-    {#if ended}
+    {#if dayDone}
+      <section class="over">
+        <p class="answer-label">Day complete</p>
+        <p class="final-score total">{view.score} pts</p>
+        <div class="over-actions">
+          <button class="primary" onclick={share}>{copied ? 'Copied' : 'Share result'}</button>
+          {#if view.game.kind === 'daily'}
+            <span class="muted">streak {stats.streak} · best {stats.best} pts</span>
+          {/if}
+        </div>
+      </section>
+    {:else if roundDone}
       <section class="over">
         <p class="answer-label">
-          {view.solved ? 'Found it' : 'The word was'}
+          {currentResult?.solved ? 'Solved' : currentResult?.givenUp ? 'Gave up' : 'Out of guesses'}
         </p>
-        <p class="answer"><strong>{view.answer}</strong></p>
+        <p class="answer"><strong>{view.roundAnswer}</strong></p>
+        <p class="final-score">{currentResult?.score ?? 0} pts for this word</p>
         <div class="over-actions">
-          <button class="primary" onclick={share}>{copied ? 'Copied' : 'Share'}</button>
-          <button class="ghost" onclick={newGame}>New game</button>
-          {#if view.game.kind === 'daily'}
-            <span class="muted">{stats.streak} streak · best {stats.max}</span>
-          {/if}
+          <button class="primary" onclick={nextWord}>Next word</button>
         </div>
       </section>
     {:else}
@@ -275,6 +300,15 @@
         <button class="primary" type="submit" disabled={busy || !guessInput.trim()}>Guess</button>
       </form>
       {#if error}<p class="error">{error}</p>{/if}
+      <div class="give-up">
+        {#if confirmingGiveUp}
+          <span class="muted">Give up on this word?</span>
+          <button class="help" onclick={giveUp}>yes, skip it</button>
+          <button class="help" onclick={() => (confirmingGiveUp = false)}>cancel</button>
+        {:else}
+          <button class="help" onclick={() => (confirmingGiveUp = true)}>give up</button>
+        {/if}
+      </div>
     {/if}
   {/if}
 
@@ -286,7 +320,7 @@
         <h2 id="howto-title">How to play</h2>
         <button class="close" onclick={() => dialog?.close()} aria-label="Close">×</button>
       </div>
-      <p>Find the hidden word in 10 guesses. Every guess gives three signals:</p>
+      <p>Find five hidden words a day — 10 guesses each. Every guess gives three signals:</p>
       <ul>
         <li>
           <strong>A percentage</strong> — how similar your word is to the hidden word.
@@ -306,7 +340,13 @@
       </p>
       <p>
         Hints never name the hidden word or its close variants, and they get more oblique the further
-        away you are. Guess the exact hidden word to win.
+        away you are. Guess the exact word to move on to the next one.
+      </p>
+      <p>
+        <strong>Scoring:</strong> every guess earns its similarity percentage, and solving early adds a
+        bonus of up to 2,000 points (2,000 for the first guess, then 1,800, and so on down to 200).
+        Stuck on a word? <strong>Give up</strong> to skip it and keep the points you earned. After all
+        five words, share your day.
       </p>
       <p class="source">
         Meanings come from <strong>GloVe</strong> word vectors trained on the 2014 Wikipedia dump plus the
@@ -393,6 +433,46 @@
     transition: width 300ms ease;
   }
 
+  .score {
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .rounds {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+
+  .round-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 5px 10px;
+    border-radius: 8px;
+    font-size: 12px;
+    background: var(--track);
+  }
+
+  .round-chip strong {
+    font-weight: 600;
+  }
+
+  .round-chip.good {
+    background: color-mix(in srgb, var(--good) 14%, transparent);
+    color: var(--good);
+  }
+
+  .round-chip.bad {
+    background: color-mix(in srgb, var(--bad) 12%, transparent);
+    color: var(--bad);
+  }
+
+  .round-meta {
+    color: var(--muted);
+  }
+
   .help {
     border: 0;
     background: none;
@@ -448,6 +528,14 @@
   .row:hover {
     box-shadow: var(--shadow-md);
     transform: translateY(-1px);
+  }
+
+  .giveup-row {
+    justify-content: center;
+    font-size: 13px;
+    background: transparent;
+    box-shadow: none;
+    animation: none;
   }
 
   @keyframes rise {
@@ -547,6 +635,15 @@
     color: var(--muted);
   }
 
+  .give-up {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 16px;
+    font-size: 13px;
+  }
+
   .entry button,
   .over button {
     border: 0;
@@ -572,13 +669,6 @@
 
   button.primary:hover:not(:disabled) {
     filter: brightness(1.2);
-  }
-
-  button.ghost {
-    background: none;
-    box-shadow: none;
-    color: var(--muted);
-    padding: 13px 10px;
   }
 
   button:disabled {
@@ -625,6 +715,19 @@
 
   .answer strong {
     font-size: 30px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
+
+  .final-score {
+    margin: 0 0 18px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--brand);
+  }
+
+  .final-score.total {
+    font-size: 28px;
     font-weight: 800;
     letter-spacing: -0.02em;
   }

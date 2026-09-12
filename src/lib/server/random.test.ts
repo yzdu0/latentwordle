@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Puzzle, Store, Vocab } from './store.ts';
-import { mulberry32, randomPuzzle } from './random.ts';
+import { MAX_ROUNDS } from '$lib/game/rules.ts';
+import { mulberry32, randomAnswers } from './random.ts';
 
 class PuzzleStore implements Store {
   constructor(private puzzles: Puzzle[]) {}
@@ -19,9 +20,7 @@ class PuzzleStore implements Store {
   }
 }
 
-const puzzles: Puzzle[] = ['shark', 'volcano', 'library', 'courage', 'guitar', 'winter'].map((answer) => ({
-  answer,
-}));
+const puzzles: Puzzle[] = Array.from({ length: 20 }, (_, i) => ({ answer: `word${i}` }));
 const store = new PuzzleStore(puzzles);
 
 describe('mulberry32', () => {
@@ -32,29 +31,31 @@ describe('mulberry32', () => {
   });
 });
 
-describe('randomPuzzle', () => {
+describe('randomAnswers', () => {
   it('is deterministic for the same seed', async () => {
-    expect(await randomPuzzle(store, 1234)).toEqual(await randomPuzzle(store, 1234));
+    expect(await randomAnswers(store, 1234)).toEqual(await randomAnswers(store, 1234));
   });
 
-  it('returns a curated answer', async () => {
+  it('returns five distinct curated answers', async () => {
     for (let seed = 0; seed < 20; seed++) {
-      const puzzle = await randomPuzzle(store, seed);
-      expect(puzzle).not.toBeNull();
-      expect(puzzles.map((p) => p.answer)).toContain(puzzle!.answer);
+      const answers = await randomAnswers(store, seed);
+      expect(answers).not.toBeNull();
+      expect(answers).toHaveLength(MAX_ROUNDS);
+      expect(new Set(answers).size).toBe(MAX_ROUNDS);
+      for (const answer of answers!) expect(puzzles.map((p) => p.answer)).toContain(answer);
     }
   });
 
   it('varies across seeds', async () => {
     const seen = new Set<string>();
     for (let seed = 0; seed < 30; seed++) {
-      const puzzle = await randomPuzzle(store, seed);
-      if (puzzle) seen.add(puzzle.answer);
+      const answers = await randomAnswers(store, seed);
+      if (answers) seen.add(answers.join(','));
     }
     expect(seen.size).toBeGreaterThan(1);
   });
 
-  it('returns null without puzzles', async () => {
-    expect(await randomPuzzle(new PuzzleStore([]), 1)).toBeNull();
+  it('returns null without enough puzzles', async () => {
+    expect(await randomAnswers(new PuzzleStore(puzzles.slice(0, 3)), 1)).toBeNull();
   });
 });

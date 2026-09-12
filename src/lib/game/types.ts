@@ -1,10 +1,14 @@
 export type GameRef = { kind: 'daily'; date: string } | { kind: 'random'; seed: number };
 
-export type Action = { type: 'guess'; word: string } | { type: 'giveup' };
+export type Action =
+  | { type: 'guess'; word: string }
+  | { type: 'giveup' }
+  | { type: 'next' };
 
 export interface GameStart {
   game: GameRef;
   maxTurns: number;
+  rounds: number;
 }
 
 export interface GuessEntry {
@@ -25,16 +29,27 @@ export interface GiveUpEntry {
 
 export type HistoryEntry = GuessEntry | GiveUpEntry;
 
+export interface RoundSummary {
+  index: number;
+  answer: string;
+  solved: boolean;
+  givenUp: boolean;
+  turnsUsed: number;
+  score: number;
+}
+
 export interface GameView {
   game: GameRef;
   maxTurns: number;
+  rounds: number;
+  round: number;
   turnsUsed: number;
+  finished: boolean;
+  roundEnded: boolean;
+  roundAnswer: string | null;
   history: HistoryEntry[];
-  solved: boolean;
-  revealed: boolean;
-  givenUp: boolean;
+  results: RoundSummary[];
   score: number;
-  answer: string | null;
 }
 
 export type GameErrorCode =

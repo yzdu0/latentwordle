@@ -1,11 +1,13 @@
 import type { GameError } from './types.ts';
 
-export const MAX_TURNS = 5;
+export const MAX_TURNS = 10;
+export const MAX_ROUNDS = 5;
 
 export interface NormalizedGuess {
   type: 'guess';
   turn: number;
   word: string;
+  actionIndex: number;
 }
 
 export interface NormalizedGiveUp {
@@ -14,12 +16,17 @@ export interface NormalizedGiveUp {
 
 export type NormalizedAction = NormalizedGuess | NormalizedGiveUp;
 
-export interface ReplayState {
-  timeline: NormalizedAction[];
-  turnsUsed: number;
-  solved: boolean;
-  revealed: boolean;
+export interface NormalizedRound {
+  index: number;
+  turns: NormalizedGuess[];
   givenUp: boolean;
+  solved: boolean;
+}
+
+export interface ReplayState {
+  rounds: NormalizedRound[];
+  current: NormalizedRound;
+  finished: boolean;
 }
 
 export type ReplayResult = { ok: true; state: ReplayState } | { ok: false; error: GameError };
@@ -32,35 +39,54 @@ export function normalizeWord(input: unknown): string | null {
   return WORD_RE.test(word) ? word : null;
 }
 
-export function replay(rawActions: unknown, answer: string, maxTurns = MAX_TURNS): ReplayResult {
+function newRound(index: number): NormalizedRound {
+  return { index, turns: [], givenUp: false, solved: false };
+}
+
+export function roundEnded(round: NormalizedRound, maxTurns = MAX_TURNS): boolean {
+  return round.solved || round.givenUp || round.turns.length >= maxTurns;
+}
+
+export function replay(
+  rawActions: unknown,
+  answers: string[],
+  maxTurns = MAX_TURNS,
+  rounds = MAX_ROUNDS,
+): ReplayResult {
   if (!Array.isArray(rawActions)) {
     return { ok: false, error: { error: 'bad_request', detail: 'actions must be an array' } };
   }
-  const giveUpCount = rawActions.filter(
-    (action) => (action as { type?: unknown })?.type === 'giveup',
-  ).length;
-  if (rawActions.length - giveUpCount > maxTurns) {
-    return { ok: false, error: { error: 'action_limit', actionIndex: maxTurns } };
-  }
 
   const state: ReplayState = {
-    timeline: [],
-    turnsUsed: 0,
-    solved: false,
-    revealed: false,
-    givenUp: false,
+    rounds: [],
+    current: newRound(0),
+    finished: answers.length === 0,
   };
 
   for (let i = 0; i < rawActions.length; i++) {
     const action = rawActions[i] as { type?: unknown; word?: unknown };
-    if (state.solved || state.revealed || state.givenUp || state.turnsUsed >= maxTurns) {
+    if (state.finished) {
       return { ok: false, error: { error: 'game_over', actionIndex: i } };
+    }
+    const round = state.current;
+    const ended = roundEnded(round, maxTurns);
+
+    if (action?.type === 'next') {
+      if (!ended || round.index >= rounds - 1) {
+        return { ok: false, error: { error: 'invalid_action', actionIndex: i } };
+      }
+      state.rounds.push(round);
+      state.current = newRound(round.index + 1);
+      continue;
+    }
+
+    if (ended) {
+      return { ok: false, error: { error: 'invalid_action', actionIndex: i, detail: 'round over' } };
     }
 
     if (action?.type === 'giveup') {
-      state.givenUp = true;
-      state.revealed = true;
-      state.timeline.push({ type: 'giveup' });
+      round.givenUp = true;
+      if (round.index >= rounds - 1) state.finished = true;
       continue;
     }
 
@@ -71,11 +97,12 @@ export function replay(rawActions: unknown, answer: string, maxTurns = MAX_TURNS
     if (!word) {
       return { ok: false, error: { error: 'invalid_action', actionIndex: i } };
     }
-    state.turnsUsed += 1;
-    state.timeline.push({ type: 'guess', turn: state.turnsUsed, word });
-    if (word === answer) state.solved = true;
+    round.turns.push({ type: 'guess', turn: round.turns.length + 1, word, actionIndex: i });
+    if (word === answers[round.index]) round.solved = true;
+    if ((round.solved || round.turns.length >= maxTurns) && round.index >= rounds - 1) {
+      state.finished = true;
+    }
   }
 
-  state.revealed = state.revealed || (!state.solved && state.turnsUsed >= maxTurns);
   return { ok: true, state };
 }
