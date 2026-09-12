@@ -1,4 +1,6 @@
 import type { GameError } from './types.ts';
+import { conceptByKey } from './concepts.ts';
+import type { ConceptKey } from './concepts.ts';
 
 export const MAX_TURNS = 10;
 export const MAX_ROUNDS = 5;
@@ -7,6 +9,8 @@ export interface NormalizedGuess {
   type: 'guess';
   turn: number;
   word: string;
+  alternatives?: string[];
+  concept?: ConceptKey;
   actionIndex: number;
 }
 
@@ -68,7 +72,7 @@ export function replay(rawActions: unknown, answers: string[], options: ReplayOp
   };
 
   for (let i = 0; i < rawActions.length; i++) {
-    const action = rawActions[i] as { type?: unknown; word?: unknown };
+    const action = rawActions[i] as { type?: unknown; word?: unknown; concept?: unknown };
     if (state.finished) {
       return { ok: false, error: { error: 'game_over', actionIndex: i } };
     }
@@ -94,15 +98,24 @@ export function replay(rawActions: unknown, answers: string[], options: ReplayOp
       continue;
     }
 
-    if (action?.type !== 'guess') {
-      return { ok: false, error: { error: 'invalid_action', actionIndex: i } };
+    let word: string | null = null;
+    let alternatives: string[] | undefined;
+    let concept: ConceptKey | undefined;
+    if (action?.type === 'guess') {
+      word = normalizeWord(action.word);
+    } else if (action?.type === 'concept') {
+      const definition = conceptByKey(typeof action.concept === 'string' ? action.concept : '');
+      if (definition) {
+        concept = definition.key;
+        word = definition.words[0];
+        alternatives = [...definition.words.slice(1)];
+      }
     }
-    const word = normalizeWord(action.word);
-    if (!word) {
-      return { ok: false, error: { error: 'invalid_action', actionIndex: i } };
+    if (!word) return { ok: false, error: { error: 'invalid_action', actionIndex: i } };
+    round.turns.push({ type: 'guess', turn: round.turns.length + 1, word, alternatives, concept, actionIndex: i });
+    if (matches(word, answers[round.index]) || alternatives?.some((candidate) => matches(candidate, answers[round.index]))) {
+      round.solved = true;
     }
-    round.turns.push({ type: 'guess', turn: round.turns.length + 1, word, actionIndex: i });
-    if (matches(word, answers[round.index])) round.solved = true;
     if ((round.solved || round.turns.length >= maxTurns) && round.index >= rounds - 1) {
       state.finished = true;
     }

@@ -2,7 +2,9 @@
   import { onMount } from 'svelte';
   import { dev } from '$app/environment';
   import { base } from '$app/paths';
+  import { CONCEPTS } from '$lib/game/concepts.ts';
   import type { Action, GameRef, GameStart, GameView } from '$lib/game/types.ts';
+  import type { ConceptKey } from '$lib/game/concepts.ts';
 
   interface Stats {
     streak: number;
@@ -33,6 +35,7 @@
   let actions = $state<Action[]>([]);
   let stats = $state<Stats>(EMPTY_STATS);
   let guessInput = $state('');
+  let conceptGuess = $state<ConceptKey | ''>('');
   let error = $state('');
   let busy = $state(true);
   let copied = $state(false);
@@ -156,9 +159,18 @@
   async function submitGuess(event: SubmitEvent) {
     event.preventDefault();
     const word = guessInput.trim().toLowerCase();
-    if (!word || busy || roundDone || dayDone) return;
+    if ((!word && !conceptGuess) || busy || roundDone || dayDone) return;
     confirmingGiveUp = false;
-    if (await post([...actions, { type: 'guess', word }])) guessInput = '';
+    if (conceptGuess) {
+      if (await post([...actions, { type: 'concept', concept: conceptGuess }])) {
+        conceptGuess = '';
+      }
+      return;
+    }
+    if (await post([...actions, { type: 'guess', word }])) {
+      guessInput = '';
+      conceptGuess = '';
+    }
   }
 
   async function giveUp() {
@@ -199,6 +211,7 @@
   <header>
     <div class="brand-block">
       <h1 class="brand"><span class="brand-latent">Latent</span>Guess</h1>
+      <p class="tagline">Find the hidden word <span class="hidden-symbol">ζ</span> - zeta.</p>
     </div>
     <div class="head-right">
       <button class="help" onclick={() => dialog?.showModal()}>How to play</button>
@@ -245,12 +258,32 @@
           {#if entry.type === 'guess'}
             {@const guess = entry}
             <div class="row">
-              {#if guess.clue}
+              {#if guess.concept && guess.comparisonWords.length}
+                <div
+                  class="equation"
+                  aria-label={`${guess.concept}: ${guess.word} at ${signedPercent(guess.similarity)}; ${guess.comparisonWords.map((word, index) => `${word} at ${signedPercent(guess.comparisonSimilarities[index] ?? 0)}`).join('; ')}`}
+                >
+                  <span class="hidden-word" title="Hidden word">ζ</span>
+                  <span class="operator result" aria-hidden="true">≈</span>
+                  <span class="concept-name">{guess.concept}</span>
+                  <span class="operator brace" aria-hidden="true">&#123;</span>
+                  <span class="term guess-term {simTone(guess.similarity)}">
+                    <span>{guess.word}:</span><span class="term-sim">{signedPercent(guess.similarity)}</span>
+                  </span>
+                  {#each guess.comparisonWords as comparisonWord, comparisonIndex}
+                    <span class="operator separator" aria-hidden="true">;</span>
+                    <span class="term guess-term {simTone(guess.comparisonSimilarities[comparisonIndex] ?? 0)}">
+                      <span>{comparisonWord}:</span><span class="term-sim">{signedPercent(guess.comparisonSimilarities[comparisonIndex] ?? 0)}</span>
+                    </span>
+                  {/each}
+                  <span class="operator brace" aria-hidden="true">&#125;</span>
+                </div>
+              {:else if guess.clue}
                 <div
                   class="equation"
                   aria-label={`Hidden word approximately equals ${guess.word} at ${signedPercent(guess.similarity)} plus ${guess.multiplier?.toFixed(1) ?? '1.0'} times ${guess.clue} at ${signedPercent(guess.clueSimilarity)}${guess.secondClue ? ` plus ${guess.secondMultiplier?.toFixed(1) ?? '1.0'} times ${guess.secondClue} at ${signedPercent(guess.secondClueSimilarity ?? 0)}` : ''}`}
                 >
-                  <span class="hidden-word" title="Hidden word">✦</span>
+                  <span class="hidden-word" title="Hidden word">ζ</span>
                   <span class="operator result" aria-hidden="true">≈</span>
                   <span class="term guess-term {simTone(guess.similarity)}">
                     <span>{guess.word}</span><span class="term-sim">{signedPercent(guess.similarity)}</span>
@@ -268,7 +301,7 @@
                 </div>
               {:else}
                 <span class="equation">
-                  <span class="hidden-word" title="Hidden word">✦</span>
+                  <span class="hidden-word" title="Hidden word">ζ</span>
                   <span class="operator result" aria-hidden="true">≈</span>
                   <span class="term guess-term {simTone(guess.similarity)}">
                     <span>{guess.word}</span><span class="term-sim">{signedPercent(guess.similarity)}</span>
@@ -313,14 +346,31 @@
       <form class="entry" onsubmit={submitGuess}>
         <input
           bind:value={guessInput}
-          placeholder={guessesLeft === 1 ? 'guess a word · 1 left' : `guess a word · ${guessesLeft} left`}
+          oninput={() => (conceptGuess = '')}
+          placeholder={conceptGuess
+            ? `concept: ${CONCEPTS.find((concept) => concept.key === conceptGuess)?.label ?? conceptGuess}`
+            : guessesLeft === 1
+              ? 'guess a word · 1 left'
+              : `guess a word · ${guessesLeft} left`}
           autocomplete="off"
           autocapitalize="off"
           spellcheck="false"
           aria-label="Guess a word"
           disabled={busy}
         />
-        <button class="primary" type="submit" disabled={busy || !guessInput.trim()}>Guess</button>
+        <select
+          class="concept-picker"
+          bind:value={conceptGuess}
+          onchange={() => (guessInput = '')}
+          aria-label="Choose an abstract concept guess"
+          disabled={busy}
+        >
+          <option value="">concepts…</option>
+          {#each CONCEPTS as concept}
+            <option value={concept.key}>{concept.label}</option>
+          {/each}
+        </select>
+        <button class="primary" type="submit" disabled={busy || (!guessInput.trim() && !conceptGuess)}>Guess</button>
       </form>
       {#if error}<p class="error">{error}</p>{/if}
       <div class="give-up">
@@ -341,7 +391,10 @@
         <h2 id="howto-title">How to play</h2>
         <button class="close" onclick={() => dialog?.close()} aria-label="Close">×</button>
       </div>
-      <p>Find five hidden words, with 10 guesses for each word.</p>
+      <p>
+        Warning: this game suffers from the quirks of machine learning from time to time.
+        <br><br>
+        Find five hidden words, with 10 guesses for each word.</p>
       <ul>
         <li>
           The percentage shows your guess's similarity to the hidden word.
@@ -349,7 +402,14 @@
         <li>
           The equation shows one, sometimes two words that linearly combine with your guess to approximate the hidden word.
         </li>
+        <li>
+          You can also use concept guesses. These compare the hidden word with a small set of words. For example, emotion uses <em>happy</em>,
+          <em>sad</em>, <em>angry</em>, and <em>afraid</em> and displays the similarity of each of these words.
+        </li>
       </ul>
+
+      <br><br><br>
+      <h3>More detail</h3>
       <p>
         Example: hidden word <em>winter</em>, guess <em>holiday</em> →
         <strong>X = holiday + 0.4 × snow + 0.3 × season</strong>.
@@ -360,7 +420,10 @@
         a word, then share your five results.
         <br>
         <br>
-        Note that similarity does <em>not</em> direct measure semantic relatedness, rather it measures how similar the words are in the context of the training corpus. 
+        Similarity does <em>not</em> directly measure meaning or define a category; it measures how similarly words are
+        used in the training corpus. This is a limitation. For example, a very common concrete noun may not be close to
+        <em>tangible</em> if those words rarely appear together. Additionally opposite meanings can have very high similarity scores if they are
+        often used together for contrast.
       </p>
       <h3>How it works</h3>
       <p>
@@ -376,6 +439,7 @@
         one-word result. Hints come from a curated pool, are at least 25% related to the answer, avoid word-form
         repeats, never name the hidden word, and become more direct as your guesses get closer.
       </p>
+      <a class="help method-link" href={`${base}/about`}>How it works</a>
       <button class="primary done" onclick={() => dialog?.close()}>Got it</button>
     </div>
   </dialog>
@@ -402,9 +466,9 @@
 
   .brand {
     margin: 0;
-    font-size: clamp(30px, 8vw, 40px);
-    font-weight: 800;
-    letter-spacing: -0.035em;
+    font-size: clamp(38px, 9.6vw, 53px);
+    font-weight: 900;
+    letter-spacing: -0.045em;
     line-height: 1.05;
   }
 
@@ -414,8 +478,14 @@
 
   .tagline {
     margin: 6px 0 0;
-    font-size: 13px;
+    font-size: 18px;
+    line-height: 1.4;
     color: var(--muted);
+  }
+
+  .hidden-symbol {
+    color: var(--brand);
+    font-weight: 800;
   }
 
   .head-right {
@@ -435,7 +505,7 @@
 
   .meta {
     margin: 0;
-    font-size: 13px;
+    font-size: 16px;
     color: var(--muted);
     font-variant-numeric: tabular-nums;
     flex-shrink: 0;
@@ -474,7 +544,7 @@
     gap: 6px;
     padding: 5px 10px;
     border-radius: 8px;
-    font-size: 12px;
+    font-size: 14px;
     background: var(--track);
   }
 
@@ -497,17 +567,25 @@
   }
 
   .help {
-    border: 0;
-    background: none;
-    padding: 0;
-    font-size: 13px;
-    color: var(--muted);
-    text-decoration: underline;
-    text-underline-offset: 3px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius);
+    background: var(--surface);
+    padding: 9px 13px;
+    font-size: 16px;
+    color: var(--text);
+    font-weight: 700;
+    text-decoration: none;
+    border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
+    box-shadow: var(--shadow-sm);
+    transition: filter 160ms ease, box-shadow 160ms ease;
   }
 
   .help:hover:not(:disabled) {
     color: var(--text);
+    background: var(--track);
+    box-shadow: var(--shadow-md);
   }
 
   .help:disabled {
@@ -519,7 +597,7 @@
     margin: 30px 0 0;
     text-align: center;
     color: var(--muted);
-    font-size: 14px;
+    font-size: 17px;
   }
 
   .board {
@@ -552,7 +630,7 @@
     display: flex;
     justify-content: center;
     padding: 10px 14px;
-    font-size: 13px;
+    font-size: 16px;
     background: transparent;
     box-shadow: none;
     animation: none;
@@ -593,8 +671,15 @@
     border-radius: 6px;
     background: var(--text);
     color: var(--surface);
-    font-size: 14px;
+    font-size: 17px;
     font-weight: 800;
+  }
+
+  .concept-name {
+    color: var(--muted);
+    font-size: 14px;
+    font-weight: 750;
+    text-transform: lowercase;
   }
 
   .term {
@@ -603,7 +688,7 @@
     gap: 6px;
     padding: 3px 7px;
     border-radius: 6px;
-    font-size: 13px;
+    font-size: 16px;
     font-weight: 650;
     flex-shrink: 0;
   }
@@ -626,7 +711,7 @@
   .term-sim {
     padding-left: 5px;
     border-left: 1px solid color-mix(in srgb, currentColor 24%, transparent);
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 750;
     font-variant-numeric: tabular-nums;
   }
@@ -660,16 +745,33 @@
     flex: 1;
     min-width: 0;
     padding: 13px 18px;
-    border: 0;
+    border: 1px solid color-mix(in srgb, var(--text) 24%, transparent);
     border-radius: var(--radius);
     background: var(--surface);
-    box-shadow: var(--shadow-sm);
+    box-shadow: 0 1px 3px color-mix(in srgb, var(--text) 10%, transparent);
     outline: none;
     transition: box-shadow 160ms ease;
   }
 
+  .concept-picker {
+    min-width: 132px;
+    padding: 12px 10px;
+    border: 1px solid color-mix(in srgb, var(--text) 24%, transparent);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: 0 1px 3px color-mix(in srgb, var(--text) 10%, transparent);
+    color: var(--muted);
+    outline: none;
+  }
+
+  .concept-picker:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+  }
+
   .entry input:focus {
-    box-shadow: var(--shadow-md);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
   }
 
   .entry input::placeholder {
@@ -682,7 +784,7 @@
     justify-content: center;
     gap: 10px;
     margin-top: 16px;
-    font-size: 13px;
+    font-size: 16px;
   }
 
   .entry button,
@@ -690,7 +792,8 @@
     border: 0;
     border-radius: var(--radius);
     padding: 13px 22px;
-    background: var(--surface);
+    background: var(--brand);
+    color: var(--text);
     box-shadow: var(--shadow-sm);
     font-weight: 600;
     transition:
@@ -704,8 +807,8 @@
   }
 
   button.primary {
-    background: var(--text);
-    color: var(--bg);
+    background: var(--brand);
+    color: var(--text);
   }
 
   button.primary:hover:not(:disabled) {
@@ -727,7 +830,8 @@
   }
 
   .entry button:focus-visible,
-  .over button:focus-visible {
+  .over button:focus-visible,
+  .concept-picker:focus-visible {
     filter: brightness(0.9);
   }
 
@@ -742,10 +846,8 @@
 
   .answer-label {
     margin: 0;
-    font-size: 11px;
+    font-size: inherit;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
     color: var(--muted);
   }
 
@@ -754,20 +856,20 @@
   }
 
   .answer strong {
-    font-size: 30px;
+    font-size: 36px;
     font-weight: 800;
     letter-spacing: -0.02em;
   }
 
   .final-score {
     margin: 0 0 18px;
-    font-size: 15px;
+    font-size: 18px;
     font-weight: 600;
     color: var(--brand);
   }
 
   .final-score.total {
-    font-size: 28px;
+    font-size: 34px;
     font-weight: 800;
     letter-spacing: -0.02em;
   }
@@ -781,12 +883,12 @@
   }
 
   .over-actions .muted {
-    font-size: 13px;
+    font-size: 16px;
   }
 
   .error {
     color: var(--bad);
-    font-size: 13px;
+    font-size: 16px;
     margin: 12px 0 0;
     text-align: center;
   }
@@ -828,19 +930,19 @@
 
   .sheet h2 {
     margin: 0;
-    font-size: 18px;
+    font-size: 22px;
     font-weight: 700;
     letter-spacing: -0.01em;
   }
 
   .sheet h3 {
     margin: 16px 0 4px;
-    font-size: 14px;
+    font-size: 17px;
     font-weight: 700;
   }
 
   .sheet p {
-    font-size: 14px;
+    font-size: 17px;
     line-height: 1.55;
     margin: 10px 0;
   }
@@ -851,21 +953,34 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-    font-size: 14px;
+    font-size: 17px;
     line-height: 1.55;
   }
 
   .close {
-    border: 0;
-    background: none;
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: var(--surface);
     color: var(--muted);
-    font-size: 20px;
+    font-size: 24px;
     line-height: 1;
-    padding: 0 4px;
+    padding: 0;
+    border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
+    box-shadow: var(--shadow-sm);
   }
 
   .close:hover {
     color: var(--text);
+    background: var(--track);
+    box-shadow: var(--shadow-md);
+  }
+
+  .method-link {
+    width: 100%;
+    margin-top: 8px;
   }
 
   .done {
@@ -884,7 +999,20 @@
     }
 
     .brand {
-      font-size: 32px;
+      font-size: 38px;
+    }
+
+    .entry {
+      flex-wrap: wrap;
+    }
+
+    .concept-picker {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .entry button {
+      flex: 0 0 auto;
     }
 
   }

@@ -1,8 +1,8 @@
 :root {
-  --bg: #faf7f1;
+  --bg: #ffffff;
   --surface: #ffffff;
   --text: #211e19;
-  --muted: #8e887e;
+  --muted: #303030;
   --accent: #3d7a5c;
   --good: #3d7a5c;
   --mid: #c2913a;
@@ -19,7 +19,7 @@
     --bg: #151411;
     --surface: #1f1d1a;
     --text: #f0ede7;
-    --muted: #958f85;
+    --muted: #777169;
     --accent: #7fb392;
     --good: #7fb392;
     --mid: #d0a75a;
@@ -42,9 +42,7 @@ body {
 }
 
 body {
-  background:
-    radial-gradient(900px 420px at 50% -160px, color-mix(in srgb, var(--brand) 12%, transparent), transparent 70%),
-    var(--bg);
+  background: var(--bg);
   color: var(--text);
   font-family:
     ui-sans-serif,
@@ -52,13 +50,15 @@ body {
     -apple-system,
     'Segoe UI',
     sans-serif;
-  font-size: 16px;
+  font-size: 19px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
   color: inherit;
 }

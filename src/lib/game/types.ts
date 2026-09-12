@@ -1,7 +1,10 @@
+import type { ConceptKey } from './concepts.ts';
+
 export type GameRef = { kind: 'daily'; date: string } | { kind: 'random'; seed: number };
 
 export type Action =
   | { type: 'guess'; word: string }
+  | { type: 'concept'; concept: ConceptKey }
   | { type: 'giveup' }
   | { type: 'next' };
 
@@ -20,6 +23,11 @@ export interface GuessEntry {
   clue: string;
   multiplier: number | null;
   clueSimilarity: number;
+  concept: ConceptKey | null;
+  comparisonWords: string[];
+  comparisonSimilarities: number[];
+  comparisonWord: string | null;
+  comparisonSimilarity: number | null;
   secondClue: string | null;
   secondMultiplier: number | null;
   secondClueSimilarity: number | null;

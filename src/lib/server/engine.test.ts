@@ -180,6 +180,32 @@ describe('nearestToDifference', () => {
 });
 
 describe('computeView', () => {
+  it('evaluates concept guesses as a contrast pair', async () => {
+    const store = new FakeVocabStore({
+      plural: [1, 0, 0],
+      singular: [0, 1, 0],
+      target: [0.2, 0.98, 0],
+    });
+    const result = await computeView(
+      { store },
+      game,
+      ['target'],
+      [{ type: 'concept', concept: 'plurality' }],
+      1,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const entry = result.view.history[0];
+    expect(entry.type).toBe('guess');
+    if (entry.type !== 'guess') return;
+    expect(entry.concept).toBe('plurality');
+    expect(entry.word).toBe('plural');
+    expect(entry.comparisonWords).toEqual(['singular']);
+    expect(entry.comparisonSimilarities).toHaveLength(1);
+    expect(entry.comparisonWord).toBe('singular');
+    expect(entry.comparisonSimilarity).toBeGreaterThan(entry.similarity);
+  });
+
   it('returns a clue for each guess', async () => {
     const result = await run(new FakeVocabStore(entries), [guess('cat')]);
     expect(result.ok).toBe(true);
@@ -197,6 +223,11 @@ describe('computeView', () => {
         clue: 'forest',
         multiplier: 0.2,
         clueSimilarity: 0.402,
+        concept: null,
+        comparisonWords: [],
+        comparisonSimilarities: [],
+        comparisonWord: null,
+        comparisonSimilarity: null,
         secondClue: null,
         secondMultiplier: null,
         secondClueSimilarity: null,
