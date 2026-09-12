@@ -75,10 +75,27 @@
     typeof window === 'undefined' ? `${base}/` : new URL(`${base}/`, window.location.origin).toString(),
   );
   const shareText = $derived.by(() => {
-    if (!view) return '';
-    const tag = view.game.kind === 'daily' ? view.game.date : 'random';
-    const marks = roundResults.map((r) => (r.solved ? `🟩${r.turnsUsed}` : '🟥X')).join(' ');
-    return `LatentGuess ${tag}\n${marks}\nScore: ${view.score} pts\n${shareLink}`;
+    const gameView = view;
+    if (!gameView) return '';
+    const gameLabel = gameView.game.kind === 'daily' ? `Daily ${gameView.game.date}` : `Random #${gameView.game.seed}`;
+    const solved = roundResults.filter((result) => result.solved).length;
+    const scorecard = roundResults
+      .map((result) => {
+        if (result.solved) return `🟩 ${result.turnsUsed}/${gameView.maxTurns}`;
+        return `${result.bestSimilarity > 0.5 ? '🟧' : '🟥'} X/${gameView.maxTurns}`;
+      })
+      .join('\n');
+    return [
+      `LatentGuess — ${gameLabel}`,
+      `ζ ${solved}/${gameView.rounds} words found`,
+      '',
+      scorecard,
+      '',
+      `${gameView.score.toLocaleString('en-US')} points`,
+      '',
+      'Can you find ζ?',
+      shareLink,
+    ].join('\n');
   });
 
   const simTone = (similarity: number) => (similarity >= 0.6 ? 'good' : similarity >= 0.35 ? 'mid' : 'bad');
@@ -350,7 +367,7 @@
   <meta name="twitter:title" content="LatentGuess — Vector word guessing" />
   <meta
     name="twitter:description"
-    content="Find the hidden word using GloVe embeddings, vector hints, and concept probes."
+    content="Find ζ, the hidden word. Follow vector hints and semantic axes through a 300-dimensional latent space."
   />
   <meta name="twitter:image" content="https://nphard.app/latent/og-preview.svg" />
 </svelte:head>

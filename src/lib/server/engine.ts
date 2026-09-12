@@ -372,6 +372,7 @@ export async function computeView(
 
   for (const round of state.rounds) {
     let points = 0;
+    let bestSimilarity = 0;
     for (const turn of round.turns) {
       if (turn.concept) continue;
       const row = vocab.index.get(turn.word);
@@ -379,6 +380,7 @@ export async function computeView(
         return { ok: false, error: { error: 'not_a_word', actionIndex: turn.actionIndex, detail: turn.word } };
       }
       const primarySimilarity = rowSimilarity(vocab, row, answerRows[round.index]!);
+      bestSimilarity = Math.max(bestSimilarity, primarySimilarity);
       points += Math.max(0, Math.round(primarySimilarity * 100));
     }
     const bonus = round.solved ? (MAX_TURNS - round.turns.length + 1) * 200 : 0;
@@ -389,6 +391,7 @@ export async function computeView(
       givenUp: round.givenUp,
       turnsUsed: round.turns.length,
       score: points + bonus,
+      bestSimilarity: round.solved ? 1 : Math.round(bestSimilarity * 1000) / 1000,
     };
     results.push(summary);
     score += summary.score;
@@ -399,6 +402,7 @@ export async function computeView(
   const history: HistoryEntry[] = [];
   const usedRows = new Set<number>();
   let roundPoints = 0;
+  let bestSimilarity = 0;
   for (const turn of round.turns) {
     const guessRow = vocab.index.get(turn.word);
     if (guessRow === undefined) {
@@ -412,7 +416,10 @@ export async function computeView(
     const isWin = !concept && matches(turn.word, answers[round.index]);
     const primarySimilarity = isWin ? 1 : rowSimilarity(vocab, guessRow, answerRow);
     const similarity = Math.round(primarySimilarity * 1000) / 1000;
-    if (!concept) roundPoints += Math.max(0, Math.round(similarity * 100));
+    if (!concept) {
+      bestSimilarity = Math.max(bestSimilarity, similarity);
+      roundPoints += Math.max(0, Math.round(similarity * 100));
+    }
     history.push({
       type: 'guess',
       turn: turn.turn,
@@ -457,6 +464,7 @@ export async function computeView(
       givenUp: round.givenUp,
       turnsUsed: round.turns.length,
       score: roundScore,
+      bestSimilarity: round.solved ? 1 : Math.round(bestSimilarity * 1000) / 1000,
     });
   }
   score += ended ? roundScore : roundPoints;

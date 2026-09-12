@@ -53,6 +53,7 @@ export interface RoundSummary {
   givenUp: boolean;
   turnsUsed: number;
   score: number;
+  bestSimilarity: number;
 }
 
 export interface GameView {

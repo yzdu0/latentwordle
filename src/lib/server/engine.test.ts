@@ -279,6 +279,7 @@ describe('computeView', () => {
     expect(result.view.roundAnswer).toBe('wolf');
     expect(result.view.results).toHaveLength(1);
     expect(result.view.results[0]).toMatchObject({ answer: 'wolf', solved: true, turnsUsed: 2 });
+    expect(result.view.results[0].bestSimilarity).toBe(1);
     expect(result.view.score).toBe(100 + (MAX_TURNS - 2 + 1) * 200);
     const last = result.view.history.at(-1);
     if (last?.type !== 'guess') return;
@@ -326,6 +327,7 @@ describe('computeView', () => {
     expect(result.view.roundEnded).toBe(true);
     expect(result.view.roundAnswer).toBe('wolf');
     expect(result.view.results[0]).toMatchObject({ answer: 'wolf', solved: false, givenUp: true });
+    expect(result.view.results[0].bestSimilarity).toBeCloseTo(0.6, 2);
     expect(result.view.score).toBe(60);
     expect(result.view.history.at(-1)).toEqual({ type: 'giveup', turn: 1 });
   });
