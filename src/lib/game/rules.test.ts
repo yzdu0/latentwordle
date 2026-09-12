@@ -113,4 +113,12 @@ describe('replay', () => {
     expect(replay([guess('ab')], answers).ok).toBe(false);
     expect(replay('nope', answers).ok).toBe(false);
   });
+
+  it('uses a concept probe as a turn without treating an anchor as the answer', () => {
+    const result = replay([{ type: 'concept', concept: 'plurality' }], ['cats'], { rounds: 1 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.current.turns[0]).toMatchObject({ concept: 'plurality', word: 'cats' });
+    expect(result.state.current.solved).toBe(false);
+  });
 });

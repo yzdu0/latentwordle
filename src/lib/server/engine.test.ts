@@ -5,6 +5,7 @@ import { clueSimilarityCap, computeView, isVariant, nearestToDifference } from '
 import { stem } from '$lib/game/morphology.ts';
 import { MAX_TURNS } from '$lib/game/rules.ts';
 import { l2normalize, quantize } from '$lib/game/scoring.ts';
+import { conceptByKey } from '$lib/game/concepts.ts';
 
 class FakeVocabStore implements Store {
   vocab: Vocab;
@@ -180,12 +181,14 @@ describe('nearestToDifference', () => {
 });
 
 describe('computeView', () => {
-  it('evaluates concept guesses as a contrast pair', async () => {
-    const store = new FakeVocabStore({
-      plural: [1, 0, 0],
-      singular: [0, 1, 0],
-      target: [0.2, 0.98, 0],
-    });
+  it('projects concept guesses onto an averaged semantic axis', async () => {
+    const plurality = conceptByKey('plurality')!;
+    const conceptEntries: Record<string, number[]> = { target: [1, 0, 0] };
+    for (const [positive, negative] of plurality.pairs ?? []) {
+      conceptEntries[positive] = [1, 0.1, 0];
+      conceptEntries[negative] = [-1, 0.1, 0];
+    }
+    const store = new FakeVocabStore(conceptEntries);
     const result = await computeView(
       { store },
       game,
@@ -199,11 +202,12 @@ describe('computeView', () => {
     expect(entry.type).toBe('guess');
     if (entry.type !== 'guess') return;
     expect(entry.concept).toBe('plurality');
-    expect(entry.word).toBe('plural');
-    expect(entry.comparisonWords).toEqual(['singular']);
-    expect(entry.comparisonSimilarities).toHaveLength(1);
-    expect(entry.comparisonWord).toBe('singular');
-    expect(entry.comparisonSimilarity).toBeGreaterThan(entry.similarity);
+    expect(entry.word).toBe('cats');
+    expect(entry.conceptScore).toBeGreaterThan(0.9);
+    expect(entry.conceptPosition).toBeGreaterThan(0.9);
+    expect(entry.conceptPositiveLabel).toBe('plural');
+    expect(entry.conceptNegativeLabel).toBe('singular');
+    expect(result.view.score).toBe(0);
   });
 
   it('returns a clue for each guess', async () => {
@@ -224,10 +228,10 @@ describe('computeView', () => {
         multiplier: 0.2,
         clueSimilarity: 0.402,
         concept: null,
-        comparisonWords: [],
-        comparisonSimilarities: [],
-        comparisonWord: null,
-        comparisonSimilarity: null,
+        conceptScore: null,
+        conceptPosition: null,
+        conceptPositiveLabel: null,
+        conceptNegativeLabel: null,
         secondClue: null,
         secondMultiplier: null,
         secondClueSimilarity: null,

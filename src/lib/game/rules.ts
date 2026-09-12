@@ -9,7 +9,6 @@ export interface NormalizedGuess {
   type: 'guess';
   turn: number;
   word: string;
-  alternatives?: string[];
   concept?: ConceptKey;
   actionIndex: number;
 }
@@ -99,7 +98,6 @@ export function replay(rawActions: unknown, answers: string[], options: ReplayOp
     }
 
     let word: string | null = null;
-    let alternatives: string[] | undefined;
     let concept: ConceptKey | undefined;
     if (action?.type === 'guess') {
       word = normalizeWord(action.word);
@@ -107,13 +105,12 @@ export function replay(rawActions: unknown, answers: string[], options: ReplayOp
       const definition = conceptByKey(typeof action.concept === 'string' ? action.concept : '');
       if (definition) {
         concept = definition.key;
-        word = definition.words[0];
-        alternatives = [...definition.words.slice(1)];
+        word = definition.positive.words[0];
       }
     }
     if (!word) return { ok: false, error: { error: 'invalid_action', actionIndex: i } };
-    round.turns.push({ type: 'guess', turn: round.turns.length + 1, word, alternatives, concept, actionIndex: i });
-    if (matches(word, answers[round.index]) || alternatives?.some((candidate) => matches(candidate, answers[round.index]))) {
+    round.turns.push({ type: 'guess', turn: round.turns.length + 1, word, concept, actionIndex: i });
+    if (!concept && matches(word, answers[round.index])) {
       round.solved = true;
     }
     if ((round.solved || round.turns.length >= maxTurns) && round.index >= rounds - 1) {

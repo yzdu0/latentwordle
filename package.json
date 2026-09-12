@@ -20,6 +20,7 @@
     "db:seed:remote": "wrangler d1 execute latentguess --remote --file=.cache/seed.sql",
     "spike:neighbors": "node spike/neighbors.ts",
     "spike:axes": "node spike/axes.ts",
+    "spike:concepts": "node spike/concepts.ts",
     "spike:calibrate": "node spike/calibrate.ts",
     "spike:simulate": "node spike/simulate.ts",
     "spike:lexical": "node spike/lexical.ts",

@@ -105,17 +105,39 @@
   <section>
     <h2>6. Concept guesses</h2>
     <p>
-      A concept is intended to help narrow down the hidden word via comparisons. For now, this is naively implemented; maybe in the future I will find a better way to do so?
+      Concept guesses use directions in the embedding space, not similarity to a concept's name. Each direction has a
+      positive pole and a negative pole. Most are made by averaging several normalized contrast vectors:
+    </p>
+    <div class="formula"><code>u_C = normalize(mean(normalize(v(pᵢ) − v(nᵢ))))</code></div>
+    <p>
+      For example, plurality combines <code>cats − cat</code>, <code>dogs − dog</code>,
+      <code>houses − house</code>, and many more plural–singular offsets. This reinforces the shared grammatical change
+      while reducing the subject matter contributed by any one pair. Motion and relation use the same method.
+    </p>
+    <p>
+      Abstractness and emotionality are category-like rather than one repeated word relationship, so they use the
+      direction between broad example centroids. The emotion pole includes varied examples such as <em>happy</em>,
+      <em>sad</em>, <em>angry</em>, and <em>afraid</em>. The abstract and tangible examples were selected using human
+      concreteness ratings, and the ambiguous label <em>concrete</em> is not used as an anchor:
+    </p>
+    <div class="formula"><code>u_C = normalize(mean(v(abstract examples)) − mean(v(tangible examples)))</code></div>
+    <p>
+      The hidden word is projected onto the direction with <code>r = ⟨v(ζ), u_C⟩</code>. The result is calibrated against
+      the average locations of both anchor sets and displayed as <code>A_C(ζ)</code>. The two pole percentages add to
+      100%, and the signed axis score runs from −100% at the negative pole to +100% at the positive pole.
     </p>
     <ul>
-      <li><strong>abstraction:</strong> abstract, specific, tangible, physical</li>
-      <li><strong>emotion:</strong> happy, sad, angry, afraid</li>
-      <li><strong>motion:</strong> motion, stillness</li>
-      <li><strong>plurality:</strong> plural, singular</li>
-      <li><strong>relation:</strong> relation, isolation</li>
+      <li><strong>abstraction:</strong> abstract ↔ tangible</li>
+      <li><strong>emotion:</strong> emotional ↔ neutral</li>
+      <li><strong>motion:</strong> moving ↔ still</li>
+      <li><strong>plurality:</strong> plural ↔ singular</li>
+      <li><strong>relation:</strong> connected ↔ isolated</li>
     </ul>
     <p>
-
+      These are model measurements, not category facts or probabilities. GloVe has one vector per spelling, so it cannot
+      choose between senses of an overloaded word. It also learns from co-occurrence: a physical object can score less
+      tangible than expected when its name rarely appears in the same contexts as the anchor examples. Averaging many
+      contrasts makes the probe more stable, but it cannot remove those limitations.
     </p>
   </section>
 

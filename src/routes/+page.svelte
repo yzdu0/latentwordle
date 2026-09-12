@@ -424,25 +424,25 @@
           {#if entry.type === 'guess'}
             {@const guess = entry}
             <div class="row">
-              {#if guess.concept && guess.comparisonWords.length}
+              {#if guess.concept}
+                {@const positivePosition = guess.conceptPosition ?? 0.5}
+                {@const positivePercent = Math.round(positivePosition * 100)}
+                {@const negativePercent = 100 - positivePercent}
                 <div
-                  class="equation"
-                  aria-label={`${guess.concept}: ${guess.word} at ${signedPercent(guess.similarity)}; ${guess.comparisonWords.map((word, index) => `${word} at ${signedPercent(guess.comparisonSimilarities[index] ?? 0)}`).join('; ')}`}
+                  class="equation concept-equation"
+                  aria-label={`${guess.concept} axis for the hidden word: ${positivePercent}% toward ${guess.conceptPositiveLabel}, ${negativePercent}% toward ${guess.conceptNegativeLabel}`}
                 >
-                  <span class="hidden-word" title="Hidden word">ζ</span>
-                  <span class="operator result" aria-hidden="true">≈</span>
-                  <span class="concept-name">{guess.concept}</span>
-                  <span class="operator brace" aria-hidden="true">&#123;</span>
-                  <span class="term guess-term {simTone(guess.similarity)}">
-                    <span>{guess.word}:</span><span class="term-sim">{signedPercent(guess.similarity)}</span>
+                  <span class="concept-function">A<sub>{guess.concept}</sub>(<span title="Hidden word">ζ</span>)</span>
+                  <span class="operator result" aria-hidden="true">=</span>
+                  <span class="axis-score">{guess.conceptScore !== null && guess.conceptScore >= 0 ? '+' : ''}{signedPercent(guess.conceptScore ?? 0)}</span>
+                  <span class="operator" aria-hidden="true">→</span>
+                  <span class="term concept-pole" class:leading={positivePercent >= negativePercent}>
+                    <span>{guess.conceptPositiveLabel ?? 'positive'}</span><span class="term-sim">{positivePercent}%</span>
                   </span>
-                  {#each guess.comparisonWords as comparisonWord, comparisonIndex}
-                    <span class="operator separator" aria-hidden="true">;</span>
-                    <span class="term guess-term {simTone(guess.comparisonSimilarities[comparisonIndex] ?? 0)}">
-                      <span>{comparisonWord}:</span><span class="term-sim">{signedPercent(guess.comparisonSimilarities[comparisonIndex] ?? 0)}</span>
-                    </span>
-                  {/each}
-                  <span class="operator brace" aria-hidden="true">&#125;</span>
+                  <span class="operator" aria-hidden="true">/</span>
+                  <span class="term concept-pole" class:leading={negativePercent > positivePercent}>
+                    <span>{guess.conceptNegativeLabel ?? 'negative'}</span><span class="term-sim">{negativePercent}%</span>
+                  </span>
                 </div>
               {:else if guess.clue}
                 <div
@@ -607,8 +607,9 @@
           The equation shows one, sometimes two words that linearly combine with your guess to approximate the hidden word.
         </li>
         <li>
-          You can also use concept guesses. These compare the hidden word with a small set of words. For example, emotion uses <em>happy</em>,
-          <em>sad</em>, <em>angry</em>, and <em>afraid</em> and displays the similarity of each of these words.
+          Concept guesses project the hidden word onto a semantic axis built from many contrasting examples. For example,
+          plurality averages directions such as <em>cats − cat</em>, <em>dogs − dog</em>, and <em>houses − house</em>.
+          The two percentages show position between the poles; they are not ordinary cosine similarities or probabilities.
         </li>
       </ul>
 
@@ -620,8 +621,8 @@
       </p>
       <p>
         Guessing the hidden word, or a close form of it like <em>employed</em> for <em>employment</em>, solves
-        the round. Each guess scores its similarity, and solving early adds up to 2,000 points. Give up to skip
-        a word, then share your five results.
+        the round. Each word guess scores its similarity, and solving early adds up to 2,000 points. Concept probes
+        consume a guess but add no similarity points. Give up to skip a word, then share your five results.
         <br>
         <br>
         Similarity does <em>not</em> directly measure meaning or define a category; it measures how similarly words are
@@ -922,11 +923,34 @@
     font-weight: 800;
   }
 
-  .concept-name {
+  .concept-function {
+    color: var(--text);
+    font-size: 16px;
+    font-weight: 750;
+    white-space: nowrap;
+  }
+
+  .concept-function sub {
     color: var(--muted);
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  .axis-score {
+    color: var(--text);
     font-size: 14px;
     font-weight: 750;
-    text-transform: lowercase;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .concept-pole {
+    background: var(--track);
+    color: var(--muted);
+  }
+
+  .concept-pole.leading {
+    background: color-mix(in srgb, var(--accent) 13%, transparent);
+    color: var(--accent);
   }
 
   .term {

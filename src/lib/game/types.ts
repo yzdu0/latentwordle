@@ -24,10 +24,10 @@ export interface GuessEntry {
   multiplier: number | null;
   clueSimilarity: number;
   concept: ConceptKey | null;
-  comparisonWords: string[];
-  comparisonSimilarities: number[];
-  comparisonWord: string | null;
-  comparisonSimilarity: number | null;
+  conceptScore: number | null;
+  conceptPosition: number | null;
+  conceptPositiveLabel: string | null;
+  conceptNegativeLabel: string | null;
   secondClue: string | null;
   secondMultiplier: number | null;
   secondClueSimilarity: number | null;

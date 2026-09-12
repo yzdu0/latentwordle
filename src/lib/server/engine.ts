@@ -9,8 +9,10 @@ import {
   VARIANT_SIM_MIN,
 } from '$lib/game/config.ts';
 import { stem } from '$lib/game/morphology.ts';
+import { conceptByKey } from '$lib/game/concepts.ts';
 import { MAX_ROUNDS, MAX_TURNS, replay, roundEnded } from '$lib/game/rules.ts';
 import type { GameError, GameRef, GameView, HistoryEntry, RoundSummary } from '$lib/game/types.ts';
+import { projectConcept } from './concepts.ts';
 import type { Store, Vocab } from './store.ts';
 
 export interface EngineContext {
@@ -371,16 +373,13 @@ export async function computeView(
   for (const round of state.rounds) {
     let points = 0;
     for (const turn of round.turns) {
+      if (turn.concept) continue;
       const row = vocab.index.get(turn.word);
       if (row === undefined) {
         return { ok: false, error: { error: 'not_a_word', actionIndex: turn.actionIndex, detail: turn.word } };
       }
       const primarySimilarity = rowSimilarity(vocab, row, answerRows[round.index]!);
-      const comparisonSimilarities = (turn.alternatives ?? [])
-        .map((word) => vocab.index.get(word))
-        .filter((comparisonRow): comparisonRow is number => comparisonRow !== undefined)
-        .map((comparisonRow) => rowSimilarity(vocab, comparisonRow, answerRows[round.index]!));
-      points += Math.max(0, Math.round(Math.max(primarySimilarity, ...comparisonSimilarities) * 100));
+      points += Math.max(0, Math.round(primarySimilarity * 100));
     }
     const bonus = round.solved ? (MAX_TURNS - round.turns.length + 1) * 200 : 0;
     const summary: RoundSummary = {
@@ -405,55 +404,42 @@ export async function computeView(
     if (guessRow === undefined) {
       return { ok: false, error: { error: 'not_a_word', actionIndex: turn.actionIndex, detail: turn.word } };
     }
-    const comparisonWords = turn.alternatives ?? [];
-    const comparisonWord = comparisonWords[0] ?? null;
-    const comparisonRows = comparisonWords.map((word) => vocab.index.get(word));
-    const missingComparison = comparisonRows.findIndex((row) => row === undefined);
-    if (missingComparison !== -1) {
-      return { ok: false, error: { error: 'not_a_word', actionIndex: turn.actionIndex, detail: comparisonWords[missingComparison] } };
-    }
-    usedRows.add(guessRow);
-    for (const comparisonRow of comparisonRows) {
-      if (comparisonRow !== undefined) usedRows.add(comparisonRow);
-    }
-    const clue = nearestToDifference(vocab, guessRow, answerRow, usedRows);
-    const isWin = matches(turn.word, answers[round.index]) || Boolean(turn.alternatives?.some((candidate) => matches(candidate, answers[round.index])));
-    const primarySimilarity = isWin && matches(turn.word, answers[round.index]) ? 1 : rowSimilarity(vocab, guessRow, answerRow);
-    const comparisonSimilarities = comparisonRows.map((comparisonRow) => {
-      const word = vocab.words[comparisonRow!];
-      return isWin && matches(word, answers[round.index]) ? 1 : Math.round(rowSimilarity(vocab, comparisonRow!, answerRow) * 1000) / 1000;
-    });
-    const comparisonSimilarity = comparisonSimilarities[0] ?? null;
-    const similarity = Math.round(primarySimilarity * 1000) / 1000;
     const concept = turn.concept ?? null;
-    roundPoints += Math.max(0, Math.round(Math.max(similarity, ...comparisonSimilarities, -1) * 100));
+    const conceptDefinition = concept ? conceptByKey(concept) : null;
+    const conceptProjection = conceptDefinition ? projectConcept(vocab, answerRow, conceptDefinition) : null;
+    if (!concept) usedRows.add(guessRow);
+    const clue = concept ? null : nearestToDifference(vocab, guessRow, answerRow, usedRows);
+    const isWin = !concept && matches(turn.word, answers[round.index]);
+    const primarySimilarity = isWin ? 1 : rowSimilarity(vocab, guessRow, answerRow);
+    const similarity = Math.round(primarySimilarity * 1000) / 1000;
+    if (!concept) roundPoints += Math.max(0, Math.round(similarity * 100));
     history.push({
       type: 'guess',
       turn: turn.turn,
       word: turn.word,
       similarity,
-      similarityPercentile: isWin ? 1 : clue.similarityPercentile,
-      clue: concept ? '' : isWin ? answers[round.index] : clue.word,
-      multiplier: concept ? null : isWin ? null : clue.multiplier,
-      clueSimilarity: concept ? 0 : isWin ? 1 : clue.clueSimilarity,
+      similarityPercentile: isWin ? 1 : (clue?.similarityPercentile ?? 0),
+      clue: concept ? '' : isWin ? answers[round.index] : (clue?.word ?? ''),
+      multiplier: concept || isWin ? null : (clue?.multiplier ?? null),
+      clueSimilarity: concept ? 0 : isWin ? 1 : (clue?.clueSimilarity ?? 0),
       concept,
-      comparisonWords,
-      comparisonSimilarities,
-      comparisonWord,
-      comparisonSimilarity,
-      secondClue: concept ? null : isWin ? null : clue.secondWord,
-      secondMultiplier: concept ? null : isWin ? null : clue.secondMultiplier,
-      secondClueSimilarity: concept ? null : isWin ? null : clue.secondSimilarity,
-      sumWord: concept ? '' : isWin ? answers[round.index] : clue.sumWord,
-      sumSimilarity: concept ? 0 : isWin ? 1 : clue.sumSimilarity,
-      sumPercentile: concept ? 0 : isWin ? 1 : clue.sumPercentile,
-      suggestion: concept ? '' : isWin ? answers[round.index] : clue.suggestion,
-      suggestionSimilarity: concept ? 0 : isWin ? 1 : clue.suggestionSimilarity,
-      suggestionPercentile: concept ? 0 : isWin ? 1 : clue.suggestionPercentile,
+      conceptScore: conceptProjection?.score ?? null,
+      conceptPosition: conceptProjection?.position ?? null,
+      conceptPositiveLabel: conceptDefinition?.positive.label ?? null,
+      conceptNegativeLabel: conceptDefinition?.negative.label ?? null,
+      secondClue: concept || isWin ? null : (clue?.secondWord ?? null),
+      secondMultiplier: concept || isWin ? null : (clue?.secondMultiplier ?? null),
+      secondClueSimilarity: concept || isWin ? null : (clue?.secondSimilarity ?? null),
+      sumWord: concept ? '' : isWin ? answers[round.index] : (clue?.sumWord ?? ''),
+      sumSimilarity: concept ? 0 : isWin ? 1 : (clue?.sumSimilarity ?? similarity),
+      sumPercentile: concept ? 0 : isWin ? 1 : (clue?.sumPercentile ?? 0),
+      suggestion: concept ? '' : isWin ? answers[round.index] : (clue?.suggestion ?? ''),
+      suggestionSimilarity: concept ? 0 : isWin ? 1 : (clue?.suggestionSimilarity ?? similarity),
+      suggestionPercentile: concept ? 0 : isWin ? 1 : (clue?.suggestionPercentile ?? 0),
     });
-    const clueRow = vocab.index.get(clue.word);
-    const secondClueRow = clue.secondWord ? vocab.index.get(clue.secondWord) : undefined;
-    const sumRow = vocab.index.get(clue.sumWord);
+    const clueRow = clue ? vocab.index.get(clue.word) : undefined;
+    const secondClueRow = clue?.secondWord ? vocab.index.get(clue.secondWord) : undefined;
+    const sumRow = clue ? vocab.index.get(clue.sumWord) : undefined;
     if (clueRow !== undefined) usedRows.add(clueRow);
     if (secondClueRow !== undefined) usedRows.add(secondClueRow);
     if (sumRow !== undefined) usedRows.add(sumRow);
