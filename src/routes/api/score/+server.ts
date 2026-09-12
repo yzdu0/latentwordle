@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types.ts';
 import type { GameRef } from '$lib/game/types.ts';
 import { statusFor } from '$lib/server/http.ts';
-import { scoreRequest } from '$lib/server/score.ts';
+import { recordCompletedScore, scoreRequest } from '$lib/server/score.ts';
 
 function parseGame(input: unknown): GameRef | null {
   if (!input || typeof input !== 'object') return null;
@@ -17,9 +17,9 @@ function parseGame(input: unknown): GameRef | null {
 }
 
 export const POST: RequestHandler = async ({ request, platform }) => {
-  let body: { game?: unknown; actions?: unknown };
+  let body: { game?: unknown; actions?: unknown; submissionId?: unknown };
   try {
-    body = (await request.json()) as { game?: unknown; actions?: unknown };
+    body = (await request.json()) as { game?: unknown; actions?: unknown; submissionId?: unknown };
   } catch {
     return json({ error: 'bad_request', detail: 'invalid json' }, { status: 400 });
   }
@@ -29,10 +29,23 @@ export const POST: RequestHandler = async ({ request, platform }) => {
     return json({ error: 'bad_request', detail: 'invalid game' }, { status: 400 });
   }
 
+  const submissionId =
+    typeof body.submissionId === 'string' && /^[a-zA-Z0-9_-]{16,128}$/.test(body.submissionId)
+      ? body.submissionId
+      : null;
+
   try {
     const result = await scoreRequest(platform?.env, game, body.actions ?? []);
     if (!result.ok) {
       return json(result.error, { status: statusFor(result.error.error) });
+    }
+
+    if (submissionId) {
+      try {
+        await recordCompletedScore(platform?.env, game, result.view, submissionId);
+      } catch (error) {
+        console.error('Could not record completed score', error);
+      }
     }
     return json({ view: result.view });
   } catch (error) {

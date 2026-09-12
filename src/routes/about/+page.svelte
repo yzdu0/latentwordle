@@ -39,7 +39,7 @@
       For a guess vector <code>g</code> and answer vector <code>a</code>, the displayed similarity is their dot
       product:
     </p>
-    <div class="formula"><code>s(g, a) = g · a = ∑ gᵢaᵢ</code></div>
+    <div class="formula"><code>s(g, a) = gᵀa = ∑ gᵢaᵢ</code></div>
     <p>
       Because the vectors were normalized, this dot product is cosine similarity. The implementation computes the
       equivalent integer expression <code>∑ bᵍᵢbᵃᵢ / 127²</code>, rounds it to three decimals, and displays it as
@@ -60,9 +60,9 @@
     <div class="formula"><code>Δ = a − g</code></div>
     <p>
       For each eligible hint word <code>c</code>, the engine measures both its answer similarity
-      <code>c · a</code> and how strongly it projects onto that direction. Its least-squares coefficient is:
+      <code>cᵀa</code> and how strongly it projects onto that direction. Its least-squares coefficient is:
     </p>
-    <div class="formula"><code>α = (Δ · c) / (c · c)</code></div>
+    <div class="formula"><code>α = (Δᵀc) / (cᵀc)</code></div>
     <p>
       A candidate must be a positive directional step (<code>α &gt; 0.05</code>), come from the curated hint pool,
       and not be the guess, answer, a used word, or a close morphological variant. It must also be at least

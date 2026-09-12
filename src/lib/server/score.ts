@@ -1,4 +1,4 @@
-import type { GameRef } from '$lib/game/types.ts';
+import type { GameRef, GameView } from '$lib/game/types.ts';
 import { computeView } from './engine.ts';
 import type { EngineResult } from './engine.ts';
 import { dayIndexOf } from './dates.ts';
@@ -51,4 +51,35 @@ export async function scoreRequest(
   }
 
   return computeView({ store }, game, answers, rawActions, rounds);
+}
+
+export async function recordCompletedScore(
+  env: Env | undefined,
+  game: GameRef,
+  view: GameView,
+  submissionId: string,
+): Promise<void> {
+  if (!env?.DB || !view.finished) return;
+
+  const gameKey = game.kind === 'daily' ? game.date : String(game.seed);
+  const solvedRounds = view.results.filter((result) => result.solved).length;
+  const totalTurns = view.results.reduce((sum, result) => sum + result.turnsUsed, 0);
+
+  await env.DB
+    .prepare(
+      `INSERT OR IGNORE INTO game_scores
+       (submission_id, game_kind, game_key, score, rounds, solved_rounds, total_turns, completed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      submissionId,
+      game.kind,
+      gameKey,
+      view.score,
+      view.rounds,
+      solvedRounds,
+      totalTurns,
+      new Date().toISOString(),
+    )
+    .run();
 }

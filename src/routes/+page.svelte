@@ -18,6 +18,7 @@
 
   const STORAGE_KEY = 'latent:game:v3';
   const STATS_KEY = 'latent:stats:v1';
+  const SUBMISSION_ID_RE = /^[a-zA-Z0-9_-]{16,128}$/;
   const EMPTY_STATS: Stats = { streak: 0, max: 0, lastDate: null, played: 0, won: 0, score: 0, best: 0 };
   const ERROR_TEXT: Record<string, string> = {
     not_a_word: 'Not a word I know — try another.',
@@ -33,6 +34,7 @@
   let start = $state<GameStart | null>(null);
   let view = $state<GameView | null>(null);
   let actions = $state<Action[]>([]);
+  let submissionId = $state('');
   let stats = $state<Stats>(EMPTY_STATS);
   let guessInput = $state('');
   let conceptGuess = $state<ConceptKey | ''>('');
@@ -50,11 +52,14 @@
     view ? [...view.results].sort((a, b) => a.index - b.index) : [],
   );
   const currentResult = $derived(roundResults.find((result) => result.index === view?.round) ?? null);
+  const shareLink = $derived(
+    typeof window === 'undefined' ? `${base}/` : new URL(`${base}/`, window.location.origin).toString(),
+  );
   const shareText = $derived.by(() => {
     if (!view) return '';
     const tag = view.game.kind === 'daily' ? view.game.date : 'random';
     const marks = roundResults.map((r) => (r.solved ? `🟩${r.turnsUsed}` : '🟥X')).join(' ');
-    return `LatentGuess ${tag}\n${marks} · ${view.score} pts`;
+    return `LatentGuess ${tag}\n${marks}\nScore: ${view.score} pts\n${shareLink}`;
   });
 
   const simTone = (similarity: number) => (similarity >= 0.6 ? 'good' : similarity >= 0.35 ? 'mid' : 'bad');
@@ -62,6 +67,11 @@
 
   function previousDate(date: string): string {
     return new Date(Date.parse(`${date}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+  }
+
+  function createSubmissionId(): string {
+    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   }
 
   function recordStats() {
@@ -95,7 +105,7 @@
       const res = await fetch(`${base}/api/score`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ game: start.game, actions: next }),
+        body: JSON.stringify({ game: start.game, actions: next, submissionId }),
       });
       const data = (await res.json()) as { error?: string; view?: GameView };
       if (!res.ok) {
@@ -106,7 +116,7 @@
       lastErrorCode = '';
       view = data.view as GameView;
       actions = next;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ game: start.game, actions: next }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ game: start.game, actions: next, submissionId }));
       recordStats();
       return true;
     } catch {
@@ -127,23 +137,29 @@
       }
       const today = (await res.json()) as GameStart;
       start = today;
+      submissionId = '';
 
       const saved = dev ? null : localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        let parsed: { game?: GameRef; actions?: Action[] } | null = null;
+        let parsed: { game?: GameRef; actions?: Action[]; submissionId?: unknown } | null = null;
         try {
-          parsed = JSON.parse(saved) as { game?: GameRef; actions?: Action[] };
+          parsed = JSON.parse(saved) as { game?: GameRef; actions?: Action[]; submissionId?: unknown };
         } catch {
           parsed = null;
         }
         const savedGame = parsed?.game;
         const savedActions = parsed?.actions;
+        const savedSubmissionId = parsed?.submissionId;
         const savedDate = savedGame?.kind === 'daily' ? savedGame.date : null;
         const todayDate = today.game.kind === 'daily' ? today.game.date : null;
         if (savedDate === todayDate && Array.isArray(savedActions)) {
           actions = savedActions;
+          if (typeof savedSubmissionId === 'string' && SUBMISSION_ID_RE.test(savedSubmissionId)) {
+            submissionId = savedSubmissionId;
+          }
         }
       }
+      if (!submissionId) submissionId = createSubmissionId();
       const restored = actions.length > 0;
       const ok = await post(actions);
       if (!ok && restored && RESET_CODES.has(lastErrorCode)) {
@@ -211,7 +227,7 @@
   <header>
     <div class="brand-block">
       <h1 class="brand"><span class="brand-latent">Latent</span>Guess</h1>
-      <p class="tagline">Find the hidden word <span class="hidden-symbol">ζ</span> - zeta.</p>
+      <p class="tagline">Find the hidden word <span class="hidden-symbol">ζ / zeta.</span></p>
     </div>
     <div class="head-right">
       <button class="help" onclick={() => dialog?.showModal()}>How to play</button>
@@ -224,7 +240,7 @@
     <div class="status">
       <span class="meta">
         Round {view.round + 1}/{view.rounds}
-        {#if !roundDone}· {guessesLeft} {guessesLeft === 1 ? 'guess' : 'guesses'} left{/if}
+        {#if !roundDone}— {guessesLeft} {guessesLeft === 1 ? 'guess' : 'guesses'} left{/if}
       </span>
       <div class="progress" aria-hidden="true">
         <div class="progress-fill" style:width={`${(view.turnsUsed / view.maxTurns) * 100}%`}></div>
@@ -241,7 +257,7 @@
               ? `solved in ${result.turnsUsed}`
               : result.givenUp
                 ? 'gave up'
-                : 'out of guesses'} · ${result.score} pts`}
+                : 'out of guesses'} — ${result.score} pts`}
           >
             <strong>{result.answer}</strong>
             <span class="round-meta">
@@ -327,7 +343,7 @@
         <div class="over-actions">
           <button class="primary" onclick={share}>{copied ? 'Copied' : 'Share result'}</button>
           {#if view.game.kind === 'daily'}
-            <span class="muted">streak {stats.streak} · best {stats.best} pts</span>
+            <span class="muted">streak {stats.streak} | best {stats.best} pts</span>
           {/if}
         </div>
       </section>
@@ -350,8 +366,8 @@
           placeholder={conceptGuess
             ? `concept: ${CONCEPTS.find((concept) => concept.key === conceptGuess)?.label ?? conceptGuess}`
             : guessesLeft === 1
-              ? 'guess a word · 1 left'
-              : `guess a word · ${guessesLeft} left`}
+              ? 'guess a word — 1 left'
+              : `guess a word — ${guessesLeft} left`}
           autocomplete="off"
           autocapitalize="off"
           spellcheck="false"
@@ -385,6 +401,18 @@
     {/if}
   {/if}
 
+  <footer class="site-links" aria-label="More from us">
+    <span>More from us:</span>
+    <a href="https://nphard.app/HillClimb" target="_blank" rel="noreferrer">HillClimb</a>
+    <span aria-hidden="true">|</span>
+    <a
+      href="https://docs.google.com/forms/d/e/1FAIpQLSdS2u20JFA6PcRlVbywI-8FJqxlALw5zMEcePkZXdVNDRZbig/viewform?usp=publish-editor"
+      target="_blank"
+      rel="noreferrer"
+    >Feedback</a>
+    <span class="coming-soon">More coming to this game soon.</span>
+  </footer>
+
   <dialog bind:this={dialog} aria-labelledby="howto-title">
     <div class="sheet">
       <div class="sheet-head">
@@ -412,7 +440,7 @@
       <h3>More detail</h3>
       <p>
         Example: hidden word <em>winter</em>, guess <em>holiday</em> →
-        <strong>X = holiday + 0.4 × snow + 0.3 × season</strong>.
+        <strong>X = holiday + 0.4 × snow + 0.3 × season</strong>. The game will display the similarity of <em>holiday</em>, <em>snow</em>, and <em>season</em> to the hidden word <em>winter</em>.
       </p>
       <p>
         Guessing the hidden word, or a close form of it like <em>employed</em> for <em>employment</em>, solves
@@ -785,6 +813,30 @@
     gap: 10px;
     margin-top: 16px;
     font-size: 16px;
+  }
+
+  .site-links {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 34px;
+    color: var(--muted);
+    font-size: 15px;
+  }
+
+  .site-links a {
+    color: var(--accent);
+    font-weight: 700;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .coming-soon {
+    flex-basis: 100%;
+    text-align: center;
+    margin-top: 2px;
   }
 
   .entry button,
