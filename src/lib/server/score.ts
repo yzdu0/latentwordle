@@ -4,14 +4,22 @@ import { computeView } from './engine.ts';
 import type { EngineResult } from './engine.ts';
 import { dayIndexOf } from './dates.ts';
 import { getStore } from './platform.ts';
-import { randomAnswers } from './random.ts';
+import { mulberry32, randomAnswers } from './random.ts';
 import type { Store } from './store.ts';
 
 async function dailyAnswers(store: Store, dayIndex: number): Promise<string[] | null> {
   const puzzles = await store.getPuzzles();
   if (puzzles.length < MAX_ROUNDS) return null;
-  const start = (((dayIndex * MAX_ROUNDS) % puzzles.length) + puzzles.length) % puzzles.length;
-  return Array.from({ length: MAX_ROUNDS }, (_, i) => puzzles[(start + i) % puzzles.length].answer);
+  const rng = mulberry32((dayIndex * 2_654_435_761 + 1) >>> 0);
+  const used = new Set<number>();
+  const answers: string[] = [];
+  while (answers.length < MAX_ROUNDS) {
+    const index = Math.floor(rng() * puzzles.length);
+    if (used.has(index)) continue;
+    used.add(index);
+    answers.push(puzzles[index].answer);
+  }
+  return answers;
 }
 
 export async function scoreRequest(

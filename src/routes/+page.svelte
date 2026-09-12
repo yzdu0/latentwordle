@@ -20,7 +20,11 @@
     action_limit: 'No guesses left.',
     game_over: 'This game is over.',
     bad_request: 'That move did not make sense.',
+    invalid_action: 'That move is not allowed right now.',
+    store_error: 'Could not load the word data. Try again in a moment.',
+    no_puzzle: 'No puzzle available for today.',
   };
+  const RESET_CODES = new Set(['invalid_action', 'game_over', 'bad_request', 'action_limit']);
 
   let start = $state<GameStart | null>(null);
   let view = $state<GameView | null>(null);
@@ -32,6 +36,7 @@
   let copied = $state(false);
   let confirmingGiveUp = $state(false);
   let dialog = $state<HTMLDialogElement | null>(null);
+  let lastErrorCode = '';
 
   const roundDone = $derived(view ? view.roundEnded : false);
   const dayDone = $derived(view ? view.finished : false);
@@ -87,15 +92,18 @@
       });
       const data = (await res.json()) as { error?: string; view?: GameView };
       if (!res.ok) {
-        error = ERROR_TEXT[data.error ?? ''] ?? 'Something went wrong.';
+        lastErrorCode = data.error ?? '';
+        error = ERROR_TEXT[lastErrorCode] ?? 'Something went wrong.';
         return false;
       }
+      lastErrorCode = '';
       view = data.view as GameView;
       actions = next;
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ game: start.game, actions: next }));
       recordStats();
       return true;
     } catch {
+      lastErrorCode = 'network';
       error = 'Network error.';
       return false;
     } finally {
@@ -129,7 +137,13 @@
           actions = savedActions;
         }
       }
-      await post(actions);
+      const restored = actions.length > 0;
+      const ok = await post(actions);
+      if (!ok && restored && RESET_CODES.has(lastErrorCode)) {
+        actions = [];
+        localStorage.removeItem(STORAGE_KEY);
+        await post([]);
+      }
     } finally {
       busy = false;
     }

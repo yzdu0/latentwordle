@@ -17,7 +17,7 @@ export const GET: RequestHandler = async ({ platform, url }) => {
     const puzzle = await store.getPuzzle(dayIndex);
     if (!puzzle) return json({ error: 'no_puzzle' }, { status: 404 });
     const start: GameStart = { game: { kind: 'daily', date }, maxTurns: MAX_TURNS, rounds: MAX_ROUNDS };
-    return json(start, { headers: { 'cache-control': 'public, max-age=300' } });
+    return json(start, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
     return json({ error: 'store_error', detail: String(error) }, { status: 500 });
   }
