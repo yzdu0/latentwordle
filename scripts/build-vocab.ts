@@ -184,7 +184,7 @@ for await (const line of rl) {
 
 if (missingAnswers.size > 0) {
   throw new Error(`answers missing from ${EMBEDDING.model}: ${[...missingAnswers].join(', ')}`);
-}
+} 
 
 const kept = [...clean, ...proper];
 const outPath = path.join(ROOT, 'data/vocab.txt');
