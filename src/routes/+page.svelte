@@ -223,6 +223,33 @@
   });
 </script>
 
+<svelte:head>
+  <title>LatentGuess — Vector word guessing</title>
+  <meta
+    name="description"
+    content="Find the hidden word using GloVe embeddings, vector hints, and concept probes."
+  />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://nphard.app/latent/" />
+  <meta property="og:title" content="LatentGuess — Vector word guessing" />
+  <meta
+    property="og:description"
+    content="Find the hidden word using GloVe embeddings, vector hints, and concept probes."
+  />
+  <meta property="og:image" content="https://nphard.app/latent/og-preview.svg" />
+  <meta property="og:image:type" content="image/svg+xml" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="LatentGuess: vector word guessing with a zeta hidden-word marker" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="LatentGuess — Vector word guessing" />
+  <meta
+    name="twitter:description"
+    content="Find the hidden word using GloVe embeddings, vector hints, and concept probes."
+  />
+  <meta name="twitter:image" content="https://nphard.app/latent/og-preview.svg" />
+</svelte:head>
+
 <main>
   <header>
     <div class="brand-block">
