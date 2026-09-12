@@ -12,7 +12,7 @@
     {
       "binding": "DB",
       "database_name": "latentguess",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "645f0a9c-f8b5-4bfa-ab41-57f3f417386b",
       "migrations_dir": "migrations"
     }
   ],
