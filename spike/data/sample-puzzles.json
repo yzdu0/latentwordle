@@ -1,0 +1,38 @@
+[
+  {
+    "answer": "shark",
+    "concepts": ["animal", "danger", "water", "speed", "technology"],
+    "swap": { "from": "technology", "to": "sea" },
+    "guesses": ["fish", "whale", "ocean", "dog", "submarine", "tiger", "dolphin", "boat"]
+  },
+  {
+    "answer": "volcano",
+    "concepts": ["danger", "fire", "earth", "heat", "nature"],
+    "swap": { "from": "nature", "to": "mountain" },
+    "guesses": ["mountain", "explosion", "lava", "ice", "island", "dragon", "geyser"]
+  },
+  {
+    "answer": "library",
+    "concepts": ["knowledge", "quiet", "books", "building", "community"],
+    "swap": { "from": "community", "to": "learning" },
+    "guesses": ["school", "book", "silence", "museum", "computer", "librarian", "university", "stack"]
+  },
+  {
+    "answer": "courage",
+    "concepts": ["emotion", "danger", "strength", "mind", "war"],
+    "swap": { "from": "war", "to": "fear" },
+    "guesses": ["bravery", "hero", "cowardice", "army", "fear", "confidence", "lion"]
+  },
+  {
+    "answer": "thunderstorm",
+    "concepts": ["weather", "sound", "danger", "electricity", "water"],
+    "swap": { "from": "sound", "to": "light" },
+    "guesses": ["rain", "lightning", "hurricane", "noise", "cloud", "music", "flood"]
+  },
+  {
+    "answer": "microscope",
+    "concepts": ["science", "technology", "small", "glass", "discovery"],
+    "swap": { "from": "discovery", "to": "vision" },
+    "guesses": ["telescope", "bacteria", "lens", "magnify", "biology", "camera", "needle"]
+  }
+]

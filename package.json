@@ -1,0 +1,43 @@
+{
+  "name": "latentwordle",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run",
+    "seed": "node scripts/seed.ts",
+    "setup": "npm run seed && npm run db:migrate && npm run db:seed",
+    "db:migrate": "wrangler d1 migrations apply latentwordle --local",
+    "db:seed": "wrangler d1 execute latentwordle --local --file=.cache/seed.sql",
+    "spike:neighbors": "node spike/neighbors.ts",
+    "spike:axes": "node spike/axes.ts",
+    "spike:calibrate": "node spike/calibrate.ts",
+    "spike:simulate": "node spike/simulate.ts",
+    "spike:lexical": "node spike/lexical.ts",
+    "spike:glove": "node spike/glove.ts",
+    "spike:verify-workers-ai": "node spike/verify-workers-ai.ts"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.7.3"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-cloudflare": "^7.2.9",
+    "@sveltejs/kit": "^2.70.3",
+    "@sveltejs/vite-plugin-svelte": "^7.3.0",
+    "@types/node": "^24.0.0",
+    "svelte": "^5.57.0",
+    "svelte-check": "^4.7.6",
+    "typescript": "^6.0.3",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.0",
+    "wrangler": "^4.131.1"
+  },
+  "allowScripts": {
+    "onnxruntime-node@1.21.0": true,
+    "protobufjs@7.6.6": true,
+    "workerd@1.20260911.1": true
+  }
+}
