@@ -340,25 +340,25 @@
   <link rel="canonical" href="https://nphard.app/latent/" />
   <meta
     name="description"
-    content="Find the hidden word using word embeddings, vector hints, and concept probes."
+    content="Find the hidden word using meaning and semantics as clues."
   />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://nphard.app/latent/" />
   <meta property="og:title" content="LatentGuess: Vector word guessing" />
   <meta
     property="og:description"
-    content="Find the hidden word using meaning and semantics."
+    content="Find the hidden word using meaning and semantics as clues."
   />
   <meta property="og:image" content="https://nphard.app/latent/og-preview.svg" />
   <meta property="og:image:type" content="image/svg+xml" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
-  <meta property="og:image:alt" content="LatentGuess: vector word guessing with a zeta hidden-word marker" />
+  <meta property="og:image:alt" content="LatentGuess: vector word guessing with a hidden-word marker" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="LatentGuess: Vector word guessing" />
   <meta
     name="twitter:description"
-    content="Find ζ, the hidden word. Follow vector hints and semantic axes through a 300-dimensional latent space."
+    content="Find ζ, the hidden word. Follow hints in meaning and semantics."
   />
   <meta name="twitter:image" content="https://nphard.app/latent/og-preview.svg" />
 </svelte:head>
