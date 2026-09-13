@@ -138,12 +138,15 @@ const answerAliases =
 const answerByArchiveWord = new Map(
   [...answers].map((answer) => [answerAliases[answer] ?? answer, answer]),
 );
+const blocklistPath = path.join(ROOT, 'data/blocklist.txt');
 const blocklist = new Set(
-  fs
-    .readFileSync(path.join(ROOT, 'data/blocklist.txt'), 'utf8')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean),
+  fs.existsSync(blocklistPath)
+    ? fs
+        .readFileSync(blocklistPath, 'utf8')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+    : [],
 );
 
 const clean: string[] = [];

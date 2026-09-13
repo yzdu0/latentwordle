@@ -127,12 +127,15 @@ const curated = JSON.parse(fs.readFileSync(path.join(ROOT, 'data/answers-curated
 const difficult = new Set(
   JSON.parse(fs.readFileSync(path.join(ROOT, 'data/answers-difficult.json'), 'utf8')) as string[],
 );
+const blocklistPath = path.join(ROOT, 'data/blocklist.txt');
 const blocklist = new Set(
-  fs
-    .readFileSync(path.join(ROOT, 'data/blocklist.txt'), 'utf8')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean),
+  fs.existsSync(blocklistPath)
+    ? fs
+        .readFileSync(blocklistPath, 'utf8')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+    : [],
 );
 
 const selected: string[] = [];
