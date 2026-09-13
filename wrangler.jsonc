@@ -5,7 +5,7 @@
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat"],
   "vars": {
-    "DAILY_SEED": "624413479",
+    "DAILY_SEED": "314159265",
     "LOCAL_SEED": "106777546"
   },
   "routes": [
