@@ -32,6 +32,8 @@
     const LEGACY_STORAGE_KEY = "latent:game:v3";
     const STORAGE_PREFIX = "latent:game:v4";
     const STATS_KEY = "latent:stats:v1";
+    const TUTORIAL_KEY = "latent:tutorial:v1";
+    const TUTORIAL_LAST_STEP = 2;
     const SUBMISSION_ID_RE = /^[a-zA-Z0-9_-]{16,128}$/;
     const EMPTY_STATS: Stats = {
         streak: 0,
@@ -69,6 +71,8 @@
     let busy = $state(true);
     let copied = $state(false);
     let dialog = $state<HTMLDialogElement | null>(null);
+    let tutorialDialog = $state<HTMLDialogElement | null>(null);
+    let tutorialStep = $state(0);
     let lastErrorCode = "";
     let playableDates = $state<string[]>([]);
     let selectedDate = $state("");
@@ -83,6 +87,41 @@
     const decompositionReady = $derived(
         view ? view.turnsUsed >= DECOMPOSITION_UNLOCK_TURN : false,
     );
+    const quickHintWord = $derived.by(() => {
+        if (!view) return "";
+        const guessedWords = new Set(
+            view.history
+                .filter((entry) => entry.type === "guess")
+                .map((entry) => entry.word),
+        );
+        for (let index = view.history.length - 1; index >= 0; index -= 1) {
+            const entry = view.history[index];
+            if (entry.type === "guess" && entry.clue) {
+                const candidates = [
+                    { word: entry.clue, similarity: entry.clueSimilarity },
+                    ...(entry.secondClue
+                        ? [
+                              {
+                                  word: entry.secondClue,
+                                  similarity:
+                                      entry.secondClueSimilarity ?? 0,
+                              },
+                          ]
+                        : []),
+                ]
+                    .filter((candidate) => !guessedWords.has(candidate.word))
+                    .sort((a, b) => b.similarity - a.similarity);
+                if (candidates[0]) return candidates[0].word;
+            }
+            if (entry.type === "decomposition") {
+                const candidate = [...entry.terms]
+                    .filter((term) => !guessedWords.has(term.word))
+                    .sort((a, b) => b.similarity - a.similarity)[0];
+                if (candidate) return candidate.word;
+            }
+        }
+        return "";
+    });
     const guessesLeft = $derived(view ? view.maxTurns - view.turnsUsed : 0);
     const roundResults = $derived(
         view ? [...view.results].sort((a, b) => a.index - b.index) : [],
@@ -457,6 +496,23 @@
         }
     }
 
+    async function quickGuess(word: string): Promise<void> {
+        if (busy || roundDone || dayDone || hasGuessed(word)) return;
+        conceptGuess = "";
+        guessInput = word;
+        if (await post([...actions, { type: "guess", word }])) {
+            guessInput = "";
+        }
+    }
+
+    function hasGuessed(word: string): boolean {
+        return (
+            view?.history.some(
+                (entry) => entry.type === "guess" && entry.word === word,
+            ) ?? false
+        );
+    }
+
     async function selectDate(date: string): Promise<void> {
         archiveOpen = false;
         if (busy || date === selectedDate) return;
@@ -488,6 +544,37 @@
         }
     }
 
+    function rememberTutorial(): void {
+        try {
+            localStorage.setItem(TUTORIAL_KEY, "complete");
+        } catch {
+            // The walkthrough can still be dismissed when storage is unavailable.
+        }
+    }
+
+    function dismissTutorial(): void {
+        rememberTutorial();
+        tutorialDialog?.close();
+    }
+
+    function advanceTutorial(): void {
+        if (tutorialStep < TUTORIAL_LAST_STEP) {
+            tutorialStep += 1;
+            return;
+        }
+        dismissTutorial();
+    }
+
+    function showFirstVisitTutorial(): void {
+        try {
+            if (localStorage.getItem(TUTORIAL_KEY) === "complete") return;
+        } catch {
+            // Show the walkthrough if storage cannot be read.
+        }
+        tutorialStep = 0;
+        requestAnimationFrame(() => tutorialDialog?.showModal());
+    }
+
     onMount(() => {
         const savedStats = localStorage.getItem(STATS_KEY);
         if (savedStats) {
@@ -503,6 +590,7 @@
         updateCountdown();
         const countdownTimer = window.setInterval(updateCountdown, 1_000);
         void init();
+        showFirstVisitTutorial();
         return () => window.clearInterval(countdownTimer);
     });
 </script>
@@ -981,6 +1069,17 @@
                     onclick={requestDecomposition}
                     >decompose ζ (auto guess)</button
                 >
+                <button
+                    class="help quick-hint-button"
+                    disabled={busy || !quickHintWord || roundDone || dayDone}
+                    title={quickHintWord
+                        ? `Use ${quickHintWord} as your next guess`
+                        : "Make a word guess to receive a hint first"}
+                    onclick={() => void quickGuess(quickHintWord)}
+                    >{quickHintWord
+                        ? `guess “${quickHintWord}”`
+                        : "guess a hint word"}</button
+                >
                 <button class="help" onclick={giveUp}>give up</button>
             </div>
         {/if}
@@ -1000,6 +1099,123 @@
         >
         <span class="coming-soon">More coming to this game soon.</span>
     </footer>
+
+    <dialog
+        class="tutorial-dialog"
+        bind:this={tutorialDialog}
+        aria-labelledby="tutorial-title"
+        oncancel={rememberTutorial}
+    >
+        <div class="sheet tutorial-sheet">
+            <div class="sheet-head tutorial-head">
+                <span class="tutorial-progress"
+                    >{tutorialStep + 1}/{TUTORIAL_LAST_STEP + 1}</span
+                >
+                <button
+                    class="close"
+                    onclick={dismissTutorial}
+                    aria-label="Skip walkthrough">×</button
+                >
+            </div>
+
+            {#if tutorialStep === 0}
+                <div class="tutorial-copy">
+                    <h2 id="tutorial-title">Guess any word</h2>
+                    <p>
+                        The objective is to find the hidden word <strong>ζ</strong> by trying words
+                        with related meanings. You have ten guesses per word, and each guess will provide feedback.
+
+                        <br><br>
+                        For example, say our first guess is <strong>"holiday"</strong>
+                    </p>
+                </div>
+            {:else if tutorialStep === 1}
+                <div class="tutorial-copy">
+                    <h2 id="tutorial-title">Read the feedback</h2>
+                    <p>
+                        After each guess, the game will show an equation that approximates the hidden word as a combination of your guess and one or two other words.
+                        <br><br>
+                        The first equation suggests the hidden word is a combination of "holiday" and some "snow".
+
+                    </p>
+                    <div class="tutorial-examples">
+                        <article class="tutorial-example">
+                            <div class="tutorial-example-head">
+                                <span>First guess</span>
+                                <strong>holiday</strong>
+                            </div>
+                            <div class="tutorial-equation">
+                                <span class="tutorial-zeta">ζ</span>
+                                <span>≈</span>
+                                <span class="tutorial-term">holiday | 38%</span>
+                                <span>+</span>
+                                <span class="tutorial-hint">0.4 × snow | 62%</span>
+                            </div>
+                            <p><strong>Snow</strong> points toward a colder area.</p>
+                        </article>
+                        <article class="tutorial-example">
+                            <div class="tutorial-example-head">
+                                <span>Next guess</span>
+                                <strong>cold</strong>
+                            </div>
+                            <div class="tutorial-equation">
+                                <span class="tutorial-zeta">ζ</span>
+                                <span>≈</span>
+                                <span class="tutorial-term">cold | 67%</span>
+                                <span>+</span>
+                                <span class="tutorial-hint">0.3 × season | 58%</span>
+                            </div>
+                        </article>
+                    </div>
+                    <p class="tutorial-note">
+                        The percentages next to each word measure its similarity against the hidden word.
+                    </p>
+                </div>
+            {:else}
+                <div class="tutorial-copy">
+                    <h2 id="tutorial-title">Try auto guess</h2>
+                    <p>
+                        After four guesses, this button unlocks. Spend one guess
+                        and the engine will build its own two or three word
+                        combination aimed at ζ.
+                    </p>
+                    <div class="tutorial-auto-wrap">
+                        <button
+                            class="help decomposition-button tutorial-auto"
+                            type="button"
+                            disabled
+                            >decompose ζ (auto guess)</button
+                        >
+                        <span>Available after 4 guesses</span>
+                    </div>
+                    <p class="tutorial-note">
+                        This attacks the answer
+                        from a fresh direction. Generally, the combination is also a better hint of hidden word than any previous equations.
+                    </p>
+                </div>
+            {/if}
+
+            <div class="tutorial-actions">
+                {#if tutorialStep > 0}
+                    <button
+                        class="help tutorial-back"
+                        onclick={() => (tutorialStep -= 1)}>Back</button
+                    >
+                {:else}
+                    <button class="help tutorial-back" onclick={dismissTutorial}
+                        >Skip</button
+                    >
+                {/if}
+                <button class="primary tutorial-next" onclick={advanceTutorial}>
+                    {tutorialStep === TUTORIAL_LAST_STEP
+                        ? "Start playing"
+                        : tutorialStep === 1
+                          ? "Show auto guess"
+                          : "Next"}
+                </button>
+            </div>
+        </div>
+    </dialog>
 
     <dialog bind:this={dialog} aria-labelledby="howto-title">
         <div class="sheet">
@@ -1641,6 +1857,10 @@
     }
 
     .decomposition-button {
+        color: var(--brand);
+    }
+
+    .quick-hint-button {
         color: var(--accent);
     }
 
@@ -1930,6 +2150,188 @@
         line-height: 1.55;
     }
 
+    .tutorial-dialog {
+        width: min(560px, calc(100vw - 32px));
+    }
+
+    .tutorial-sheet {
+        padding: 18px 22px 22px;
+    }
+
+    .tutorial-head {
+        min-height: 34px;
+        margin-bottom: 4px;
+    }
+
+    .tutorial-progress,
+    .tutorial-kicker {
+        color: var(--accent);
+        font-size: 13px;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+    }
+
+    .tutorial-copy h2 {
+        margin-top: 6px;
+        font-size: 28px;
+    }
+
+    .tutorial-entry {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 20px 0 12px;
+        padding: 7px 7px 7px 16px;
+        border: 1px solid color-mix(in srgb, var(--text) 20%, transparent);
+        border-radius: var(--radius);
+        background: var(--surface);
+        box-shadow: var(--shadow-sm);
+        color: var(--text);
+        font-size: 17px;
+    }
+
+    .tutorial-entry > span:first-child {
+        flex: 1;
+    }
+
+    .tutorial-guess-button {
+        padding: 9px 16px;
+        border-radius: calc(var(--radius) - 3px);
+        background: var(--button-bg);
+        color: var(--button-text);
+        font-weight: 750;
+    }
+
+    .tutorial-examples {
+        display: grid;
+        gap: 10px;
+        margin: 16px 0 10px;
+    }
+
+    .tutorial-example {
+        padding: 12px;
+        border: 1px solid color-mix(in srgb, var(--text) 9%, transparent);
+        border-radius: var(--radius);
+        background: var(--surface);
+        box-shadow: var(--shadow-sm);
+    }
+
+    .tutorial-example-head {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 9px;
+        color: var(--muted);
+        font-size: 13px;
+    }
+
+    .tutorial-example-head strong {
+        color: var(--text);
+        font-size: 16px;
+    }
+
+    .tutorial-score {
+        padding: 3px 7px;
+        border-radius: 999px;
+        background: var(--track);
+        font-weight: 800;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .tutorial-score.mid {
+        color: var(--mid);
+    }
+
+    .tutorial-score.good {
+        color: var(--good);
+    }
+
+    .tutorial-equation {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 5px;
+        color: var(--muted);
+        font-size: 14px;
+    }
+
+    .tutorial-zeta {
+        display: grid;
+        place-items: center;
+        width: 25px;
+        height: 25px;
+        border-radius: 6px;
+        background: var(--text);
+        color: var(--surface);
+        font-size: 16px;
+        font-weight: 800;
+    }
+
+    .tutorial-term,
+    .tutorial-hint {
+        padding: 4px 7px;
+        border-radius: 6px;
+        background: var(--track);
+        color: var(--text);
+        font-weight: 700;
+    }
+
+    .tutorial-hint {
+        background: color-mix(in srgb, var(--accent) 12%, transparent);
+        color: var(--accent);
+    }
+
+    .tutorial-example p,
+    .sheet p.tutorial-note {
+        margin: 9px 0 0;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.4;
+    }
+
+    .tutorial-auto-wrap {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        margin: 24px 0 16px;
+        padding: 22px 16px;
+        border-radius: var(--radius);
+        background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+    }
+
+    .tutorial-auto-wrap span {
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 650;
+    }
+
+    .tutorial-auto:disabled {
+        opacity: 1;
+        cursor: default;
+    }
+
+    .tutorial-actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 22px;
+    }
+
+    .tutorial-actions button {
+        min-height: 44px;
+        border-radius: var(--radius);
+    }
+
+    .tutorial-back {
+        flex: 0 0 92px;
+    }
+
+    .tutorial-next {
+        flex: 1;
+    }
+
     .close {
         display: grid;
         place-items: center;
@@ -2017,6 +2419,29 @@
 
         .entry button {
             flex: 0 0 auto;
+        }
+
+        .tutorial-sheet {
+            padding: 16px 16px 18px;
+        }
+
+        .tutorial-copy h2 {
+            font-size: 25px;
+        }
+
+        .tutorial-example-head {
+            grid-template-columns: 1fr auto;
+        }
+
+        .tutorial-example-head > span:first-child {
+            grid-column: 1 / -1;
+        }
+
+        .tutorial-actions {
+            position: sticky;
+            bottom: -18px;
+            padding: 10px 0 0;
+            background: var(--surface);
         }
     }
 
