@@ -70,7 +70,7 @@ describe('isVariant', () => {
 describe('nearestToDifference', () => {
   it('retains the dynamic cap used by relaxed fallbacks', () => {
     expect(clueSimilarityCap(0)).toBe(0.5);
-    expect(clueSimilarityCap(0.4)).toBeCloseTo(0.75);
+    expect(clueSimilarityCap(0.4)).toBeCloseTo(0.7);
     expect(clueSimilarityCap(0.8)).toBe(0.9);
   });
 
@@ -116,19 +116,31 @@ describe('nearestToDifference', () => {
     expect(clue.multiplier).toBeNull();
   });
 
-  it('prefers hints that are at least 20% similar to the guess', () => {
+  it('prefers hints that are at least 30% similar to the guess', () => {
     const store = new FakeVocabStore({
       cat: [1, 0, 0],
       wolf: [0, 1, 0],
       detour: [-0.2, 0.6, 0.77],
-      bridge: [0.25, 0.5, 0.83],
+      bridge: [0.35, 0.47, 0.81],
     });
     const clue = nearestToDifference(store.vocab, store.vocab.index.get('cat')!, store.vocab.index.get('wolf')!);
     expect(clue.word).not.toBe('detour');
     expect(clue.word).toBe('bridge');
   });
 
-  it('falls back to an otherwise-safe hint when none reaches 20% guess similarity', () => {
+  it('applies the dynamic cap to hints that meet the guess-similarity preference', () => {
+    const store = new FakeVocabStore({
+      cat: [1, 0, 0],
+      wolf: [0, 1, 0],
+      shortcut: [0.35, 0.8, 0.48],
+      bridge: [0.35, 0.48, 0.8],
+    });
+    const clue = nearestToDifference(store.vocab, store.vocab.index.get('cat')!, store.vocab.index.get('wolf')!);
+    expect(clue.word).not.toBe('shortcut');
+    expect(clue.word).toBe('bridge');
+  });
+
+  it('falls back to an otherwise-safe hint when none reaches 30% guess similarity', () => {
     const store = new FakeVocabStore({
       cat: [1, 0, 0],
       wolf: [0, 1, 0],
@@ -172,14 +184,11 @@ describe('nearestToDifference', () => {
   it('uses a two-word fit when its landing is materially warmer', () => {
     const store = new FakeVocabStore({
       guess: [1, 0, 0, 0],
-      target: [0.270401, 0.394706, -0.44532, -0.756823],
-      decoy1: [-0.76201, -0.348323, 0.278976, 0.469237],
-      decoy2: [-0.26904, 0.595971, 0.647681, 0.391083],
-      north: [0.413117, 0.494035, -0.764986, -0.007702],
-      decoy3: [0.374591, -0.742175, 0.517225, -0.203314],
-      bridge: [0.522278, -0.096001, -0.754284, -0.386089],
-      decoy4: [0.59317, -0.050899, -0.603397, 0.530538],
-      south: [0.35367, 0.167853, 0.53272, -0.750301],
+      target: [0, 1, 0, 0],
+      north: [-0.5, 0.4, 0.768, 0],
+      norths: [-0.5, 0.8, 0, 0.3],
+      south: [-0.5, 0.4, -0.768, 0],
+      bridge: [-0.5, 0.8, 0, 0.332],
     });
     const clue = nearestToDifference(
       store.vocab,
@@ -190,7 +199,7 @@ describe('nearestToDifference', () => {
     expect(clue.secondMultiplier).toBeGreaterThan(0);
     expect(clue.sumWord).toBe('bridge');
     expect(clue.suggestion).toBe('bridge');
-    expect(clue.sumSimilarity).toBeGreaterThanOrEqual(0.73);
+    expect(clue.sumSimilarity).toBeGreaterThanOrEqual(0.79);
   });
 });
 

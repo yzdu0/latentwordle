@@ -364,7 +364,7 @@ export function nearestToDifference(
     similarity += guess[j] * target[j];
   }
   similarity = Math.round(similarity * 1000) / 1000;
-  const fallbackCap = clueSimilarityCap(similarity);
+  const cap = clueSimilarityCap(similarity);
   const progressFloor = Math.max(MIN_CLUE_SIM, similarity + MIN_CLUE_PROGRESS);
   const answerSimilarities = new Float32Array(vocab.words.length);
 
@@ -393,7 +393,7 @@ export function nearestToDifference(
     if (!vocab.hints[r]) continue;
     if (related(vocab, r, guessRow) || related(vocab, r, answerRow)) continue;
     if (contradictsAnswerPolarity(vocab.words[answerRow], vocab.words[r])) continue;
-    if (sim > CLUE_SIM_CEILING) continue;
+    if (sim > cap) continue;
 
     const alpha = norm2 > 0 ? (dot * 127) / norm2 : 0;
     if (alpha <= 0.05) continue;
@@ -401,12 +401,12 @@ export function nearestToDifference(
     const coherentWithGuess = guessSim >= MIN_CLUE_GUESS_SIM;
     if (sim >= MIN_CLUE_SIM && coherentWithGuess) {
       relevant = better({ ...candidate, score: sim }, relevant);
-    } else if (sim >= MIN_CLUE_SIM && sim <= fallbackCap) {
+    } else if (sim >= MIN_CLUE_SIM) {
       relaxedRelevant = better({ ...candidate, score: sim }, relaxedRelevant);
     }
     if (sim >= progressFloor && coherentWithGuess) {
       strict = better(candidate, strict);
-    } else if (sim >= progressFloor && sim <= fallbackCap) {
+    } else if (sim >= progressFloor) {
       relaxedStrict = better(candidate, relaxedStrict);
     }
   }
@@ -472,7 +472,7 @@ export function nearestToDifference(
     if (!vocab.hints[r]) continue;
     if (contradictsAnswerPolarity(vocab.words[answerRow], vocab.words[r])) continue;
     const sim = answerSimilarities[r];
-    if (sim < MIN_CLUE_SIM || sim > CLUE_SIM_CEILING) continue;
+    if (sim < MIN_CLUE_SIM || sim > cap) continue;
     if (
       related(vocab, r, guessRow) ||
       related(vocab, r, answerRow) ||
@@ -495,7 +495,6 @@ export function nearestToDifference(
       guessDotRaw += guess[j] * secondByte;
     }
     const coherentWithGuess = guessDotRaw / 127 >= MIN_CLUE_GUESS_SIM;
-    if (!coherentWithGuess && sim > fallbackCap) continue;
     const secondNorm2 = secondNorm2Raw / (127 * 127);
     const cross = crossRaw / (127 * 127);
     const distinctSimilarity = cross / Math.sqrt(firstNorm2 * secondNorm2);

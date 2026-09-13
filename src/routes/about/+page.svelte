@@ -68,17 +68,17 @@
     <p>
       A candidate must be a positive directional step (<code>α &gt; 0.05</code>), come from the curated hint pool,
       and not be the guess, answer, a used word, or a close morphological variant. It must be at least
-      <code>25%</code> similar to the answer, with answer similarity capped at <code>90%</code>. The engine prefers
-      candidates that are also at least <code>20%</code> similar to the guess.
+      <code>25%</code> similar to the answer. Every candidate is subject to the dynamic answer-similarity cap below,
+      including candidates that are at least <code>30%</code> similar to the guess.
     </p>
-    <div class="formula"><code>s(c, g) ≥ 0.20</code></div>
+    <div class="formula"><code>s(c, g) ≥ 0.30</code></div>
+    <div class="formula"><code>cap = clamp(s(g, a) + 0.30, 0.50, 0.90)</code></div>
     <p>
       The preferred candidate makes at least <code>0.02</code> progress over the guess. Among those candidates, the
-      engine chooses the strongest directional projection. If no otherwise-safe candidate meets the <code>20%</code>
-      guess-similarity preference, the engine relaxes that preference and returns the best eligible fallback, using
-      the original dynamic answer-similarity cap:
+      engine chooses the strongest directional projection. If no otherwise-safe candidate meets the <code>30%</code>
+      guess-similarity preference, the engine relaxes that preference and returns the best eligible fallback. The
+      same cap applies to preferred and fallback candidates.
     </p>
-    <div class="formula"><code>fallback cap = clamp(s(g, a) + 0.35, 0.50, 0.90)</code></div>
     <p>The coefficient shown in the UI is rounded to one decimal place.</p>
   </section>
 
@@ -101,8 +101,8 @@
     </p>
     <div class="formula"><code>ζ ≈ g + αc + βd</code></div>
     <p>
-      The second word follows the same answer-similarity limits, <code>20%</code> guess-similarity preference, and
-      fallback cap. It must also be sufficiently distinct from the first (cosine similarity no greater than
+      The second word follows the same answer-similarity cap, <code>30%</code> guess-similarity preference, and
+      fallback behavior. It must also be sufficiently distinct from the first (cosine similarity no greater than
       <code>0.75</code>) and have a coefficient between <code>0.05</code> and <code>2.0</code>.
     </p>
   </section>

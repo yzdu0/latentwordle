@@ -1094,10 +1094,11 @@
                 only when its nearest real-word landing is significantly closer
                 than the best one-word result. Hints come from a curated pool,
                 are at least 25% related to the answer, and prefer words at
-                least 20% related to your guess. If none fit, the engine uses
-                the best otherwise-safe fallback, capped at your guess's answer
-                similarity plus 35 percentage points. Hints avoid word-form
-                repeats, never name the hidden word, and stay below 90% answer similarity.
+                least 30% related to your guess. Every candidate is capped at
+                your guess's answer similarity plus 30 percentage points
+                (within a 50–90% range). If none meet the preference, the engine
+                uses the best otherwise-safe fallback under the same cap. Hints
+                avoid word-form repeats and never name the hidden word.
             </p>
             <a class="help method-link" href={`${base}/about`}>How it works</a>
             <button class="primary done" onclick={() => dialog?.close()}

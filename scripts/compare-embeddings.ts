@@ -82,7 +82,7 @@ function selectClue(
 ): SelectedClue | null {
   const guessSimilarity = similarity(bundle, guessRow, answerRow);
   const floor = Math.max(MIN_CLUE_SIM, guessSimilarity + MIN_CLUE_PROGRESS);
-  const fallbackCap = clueSimilarityCap(guessSimilarity);
+  const cap = clueSimilarityCap(guessSimilarity);
   const guessBase = guessRow * bundle.dim;
   const answerBase = answerRow * bundle.dim;
   let strict: { row: number; score: number; alpha: number; answerSimilarity: number } | null = null;
@@ -108,7 +108,7 @@ function selectClue(
     const candidateGuessSimilarity = similarity(bundle, guessRow, row);
     if (
       answerSimilarity < MIN_CLUE_SIM ||
-      answerSimilarity > CLUE_SIM_CEILING ||
+      answerSimilarity > cap ||
       norm2 === 0
     ) {
       continue;
@@ -119,11 +119,7 @@ function selectClue(
 
     if (coherentWithGuess && (!fallback || answerSimilarity > fallback.score)) {
       fallback = { row, score: answerSimilarity, alpha, answerSimilarity };
-    } else if (
-      !coherentWithGuess &&
-      answerSimilarity <= fallbackCap &&
-      (!relaxedFallback || answerSimilarity > relaxedFallback.score)
-    ) {
+    } else if (!coherentWithGuess && (!relaxedFallback || answerSimilarity > relaxedFallback.score)) {
       relaxedFallback = { row, score: answerSimilarity, alpha, answerSimilarity };
     }
     if (answerSimilarity >= floor) {
@@ -132,7 +128,7 @@ function selectClue(
       if (!current || projectionScore > current.score || (projectionScore === current.score && alpha > current.alpha)) {
         const candidate = { row, score: projectionScore, alpha, answerSimilarity };
         if (coherentWithGuess) strict = candidate;
-        else if (answerSimilarity <= fallbackCap) relaxedStrict = candidate;
+        else relaxedStrict = candidate;
       }
     }
   }

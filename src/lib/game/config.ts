@@ -23,9 +23,9 @@ export const DEFAULT_EMBEDDING: EmbeddingKey = 'word2vec';
 export const EMBEDDING = EMBEDDINGS[DEFAULT_EMBEDDING];
 
 export const MIN_CLUE_SIM = 0.25;
-export const MIN_CLUE_GUESS_SIM = 0.2;
+export const MIN_CLUE_GUESS_SIM = 0.3;
 export const MIN_CLUE_PROGRESS = 0.02;
-export const CLUE_SIM_MARGIN = 0.35;
+export const CLUE_SIM_MARGIN = 0.3;
 export const CLUE_SIM_FLOOR = 0.5;
 export const CLUE_SIM_CEILING = 0.9;
 export const DUAL_HINT_MAX_SIM = 0.75;
