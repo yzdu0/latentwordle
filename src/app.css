@@ -8,8 +8,10 @@
   --mid: #a85a00;
   --bad: #b0523f;
   --track: #f0ece4;
-  --brand: #ffad1f;
-  --brand-gradient: linear-gradient(135deg, #ff9500 0%, #ffb000 50%, #ffc72b 76%, #b9db4f 90%, #6ee477 100%);
+  --brand: #ffb300;
+  --logo-color: #ffd400;
+  --logo-hover: #ffe033;
+  --title-gradient: linear-gradient(135deg, #ffa000 0%, #ffb300 50%, #ffd02b 76%, #b9db4f 90%, #6ee477 100%);
   --button-bg: #e4e4e4;
   --button-hover: #d4d4d4;
   --button-text: #202020;
@@ -29,7 +31,9 @@
     --mid: #ffc15a;
     --bad: #d07a68;
     --track: #2a2723;
-    --brand: #ffc247;
+    --brand: #ffb300;
+    --logo-color: #ffd400;
+    --logo-hover: #ffe033;
     --button-bg: #3a3a3a;
     --button-hover: #484848;
     --button-text: #f2f2f2;

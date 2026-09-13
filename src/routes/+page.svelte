@@ -574,7 +574,7 @@
             <option value={concept.key}>{concept.label}</option>
           {/each}
         </select>
-        <button class="primary" type="submit" disabled={busy || (!guessInput.trim() && !conceptGuess)}>Guess</button>
+        <button class="primary guess-button" type="submit" disabled={busy || (!guessInput.trim() && !conceptGuess)}>Guess</button>
       </form>
       {#if error}<p class="error">{error}</p>{/if}
       <div class="give-up">
@@ -690,8 +690,8 @@
   }
 
   .brand-latent {
-    color: var(--brand);
-    background: var(--brand-gradient);
+    color: var(--logo-color);
+    background: var(--title-gradient);
     background-clip: text;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -705,7 +705,7 @@
   }
 
   .hidden-symbol {
-    color: var(--brand);
+    color: inherit;
     font-weight: 800;
   }
 
@@ -1129,6 +1129,15 @@
 
   button.primary:hover:not(:disabled) {
     background: var(--button-hover);
+  }
+
+  button.guess-button {
+    background: var(--logo-color);
+    color: #171717;
+  }
+
+  button.guess-button:hover:not(:disabled) {
+    background: var(--logo-hover);
   }
 
   button:disabled {
