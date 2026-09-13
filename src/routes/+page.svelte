@@ -349,18 +349,12 @@
     property="og:description"
     content="Find the hidden word using meaning and semantics as clues."
   />
-  <meta property="og:image" content="https://nphard.app/latent/og-preview.svg" />
-  <meta property="og:image:type" content="image/svg+xml" />
-  <meta property="og:image:width" content="1200" />
-  <meta property="og:image:height" content="630" />
-  <meta property="og:image:alt" content="LatentGuess: vector word guessing with a hidden-word marker" />
-  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:card" content="summary" />
   <meta name="twitter:title" content="LatentGuess: Vector word guessing" />
   <meta
     name="twitter:description"
     content="Find ζ, the hidden word. Follow hints in meaning and semantics."
   />
-  <meta name="twitter:image" content="https://nphard.app/latent/og-preview.svg" />
 </svelte:head>
 
 <main>
