@@ -980,6 +980,7 @@
         {/if}
     {/if}
 
+    <p class="bias-note">Engine results may reflect biases in the training data.</p>
     <footer class="site-links" aria-label="More from us">
         <span>More from us:</span>
         <a href="https://nphard.app/HillClimb" target="_blank" rel="noreferrer"
@@ -1062,7 +1063,8 @@
                 <br />
                 Similarity does <em>not</em> directly measure meaning or define
                 a category; it measures how similarly words are used in the
-                training corpus. This is a limitation. For example, a very
+                training corpus. This is a limitation, and results may reflect
+                biases in that training data. For example, a very
                 common concrete noun may not be close to
                 <em>tangible</em> if those words rarely appear together.
                 Additionally opposite meanings can have very high similarity
@@ -1641,6 +1643,15 @@
         margin-top: 34px;
         color: var(--muted);
         font-size: 15px;
+    }
+
+    .bias-note {
+        max-width: 680px;
+        margin: 28px auto 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.4;
+        text-align: center;
     }
 
     .site-links a {

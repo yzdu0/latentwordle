@@ -44,7 +44,8 @@
     <p>
       Because the vectors were normalized, this dot product is cosine similarity. The implementation computes the
       equivalent integer expression <code>∑ bᵍᵢbᵃᵢ / 127²</code>, rounds it to three decimals, and displays it as
-      a percentage. A percentile is also calculated by ranking that similarity against every vocabulary word.
+      a percentage. A percentile is also calculated by ranking that similarity against every vocabulary word. These
+      results may reflect biases in the training data.
     </p>
     <p>
       A guess solves the round when it exactly matches the answer, or when it is a close word-form variant: a shared
