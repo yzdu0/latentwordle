@@ -346,10 +346,10 @@
 </script>
 
 <svelte:head>
-  <title>LatentGuess — Vector word guessing</title>
+  <title>LatentGuess - Vector word guessing</title>
   <meta
     name="description"
-    content="Find the hidden word using GloVe embeddings, vector hints, and concept probes."
+    content="Find the hidden word using word embeddings, vector hints, and concept probes."
   />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://nphard.app/latent/" />
