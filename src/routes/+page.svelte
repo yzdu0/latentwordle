@@ -597,7 +597,7 @@
         {#if hardMode}
             <p class="hard-description">
                 This is the same as the main game, except the hidden words may
-                be more niche
+                be more niche. Engine output is a result of machine learning, and may have bias or inaccuracies.
             </p>
         {/if}
 
