@@ -604,7 +604,7 @@
         <ul>
         <li>Similarity: The percentage shows how close your guess (or another word) is in meaning to the hidden word. Higher is better.</li>
         <li>Word equation: After making a guess, an equation combining your guess with one or two other words is displayed. This is a clue for which direction to explore. </li>
-        <li>Concept guesses: These show where the hidden word falls between two opposite ideas, such as singular ↔ plural. The percentages show which side the hidden word is closer to—they aren't probabilities or normal similarity scores.</li>
+        <li>Concept guesses: These show where the hidden word falls between two opposite ideas, such as singular ↔ plural. The percentages show which side the hidden word is closer to.</li>
         </ul>
     <p>For example, the game learns the idea of plurality from patterns like cat → cats, dog → dogs, and house → houses.</p>
 
@@ -623,7 +623,7 @@
         Similarity does <em>not</em> directly measure meaning or define a category; it measures how similarly words are
         used in the training corpus. This is a limitation. For example, a very common concrete noun may not be close to
         <em>tangible</em> if those words rarely appear together. Additionally opposite meanings can have very high similarity scores if they are
-        often used together for contrast.
+        often used together for contrast e.g. <em>hot</em> and <em>cold</em>.
       </p>
       <h3>How it works</h3>
       <p>
