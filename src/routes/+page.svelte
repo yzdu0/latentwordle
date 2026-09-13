@@ -598,7 +598,7 @@
         <button class="close" onclick={() => dialog?.close()} aria-label="Close">×</button>
       </div>
       <p>
-        Warning: this game suffers from the quirks of machine learning from time to time.
+        Warning: Depending on the seed, this game may be DIFFICULT. We are working on features to make it easier.
         <br><br>
         Find five hidden words, with 10 guesses for each word.</p>
       <ul>
