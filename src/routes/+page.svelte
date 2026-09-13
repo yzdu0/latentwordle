@@ -49,7 +49,6 @@
   let error = $state('');
   let busy = $state(true);
   let copied = $state(false);
-  let confirmingGiveUp = $state(false);
   let dialog = $state<HTMLDialogElement | null>(null);
   let lastErrorCode = '';
   let playableDates = $state<string[]>([]);
@@ -233,7 +232,6 @@
     submissionId = '';
     guessInput = '';
     conceptGuess = '';
-    confirmingGiveUp = false;
     try {
       const query = date ? `?date=${encodeURIComponent(date)}` : '';
       const res = await fetch(`${base}/api/puzzle/today${query}`);
@@ -284,7 +282,6 @@
     event.preventDefault();
     const word = guessInput.trim().toLowerCase();
     if ((!word && !conceptGuess) || busy || roundDone || dayDone) return;
-    confirmingGiveUp = false;
     if (conceptGuess) {
       if (await post([...actions, { type: 'concept', concept: conceptGuess }])) {
         conceptGuess = '';
@@ -304,7 +301,6 @@
 
   async function giveUp() {
     if (busy || roundDone || dayDone) return;
-    confirmingGiveUp = false;
     await post([...actions, { type: 'giveup' }]);
   }
 
@@ -578,13 +574,7 @@
       </form>
       {#if error}<p class="error">{error}</p>{/if}
       <div class="give-up">
-        {#if confirmingGiveUp}
-          <span class="muted">Give up on this word?</span>
-          <button class="help" onclick={giveUp}>yes, skip it</button>
-          <button class="help" onclick={() => (confirmingGiveUp = false)}>cancel</button>
-        {:else}
-          <button class="help" onclick={() => (confirmingGiveUp = true)}>give up</button>
-        {/if}
+        <button class="help" onclick={giveUp}>give up</button>
       </div>
     {/if}
   {/if}
