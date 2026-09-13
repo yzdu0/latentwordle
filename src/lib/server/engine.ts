@@ -4,6 +4,7 @@ import {
   CLUE_SIM_MARGIN,
   DUAL_HINT_MAX_SIM,
   DUAL_HINT_MIN_GAIN,
+  MIN_CLUE_GUESS_SIM,
   MIN_CLUE_PROGRESS,
   MIN_CLUE_SIM,
   VARIANT_SIM_MIN,
@@ -363,42 +364,55 @@ export function nearestToDifference(
     similarity += guess[j] * target[j];
   }
   similarity = Math.round(similarity * 1000) / 1000;
-  const cap = clueSimilarityCap(similarity);
+  const fallbackCap = clueSimilarityCap(similarity);
   const progressFloor = Math.max(MIN_CLUE_SIM, similarity + MIN_CLUE_PROGRESS);
   const answerSimilarities = new Float32Array(vocab.words.length);
 
   let strict: Candidate | null = null;
   let relevant: Candidate | null = null;
+  let relaxedStrict: Candidate | null = null;
+  let relaxedRelevant: Candidate | null = null;
   for (let r = 0; r < vocab.words.length; r++) {
     const base = r * dim;
     let dot = 0;
     let simAnswer = 0;
+    let simGuess = 0;
     let norm2 = 0;
     for (let j = 0; j < dim; j++) {
       const b = vocab.bytes[base + j];
       dot += delta[j] * b;
       simAnswer += target[j] * b;
+      simGuess += guess[j] * b;
       norm2 += b * b;
     }
     const sim = simAnswer / 127;
+    const guessSim = simGuess / 127;
     answerSimilarities[r] = sim;
 
     if (r === guessRow || r === answerRow || excludedRows.has(r)) continue;
     if (!vocab.hints[r]) continue;
     if (related(vocab, r, guessRow) || related(vocab, r, answerRow)) continue;
     if (contradictsAnswerPolarity(vocab.words[answerRow], vocab.words[r])) continue;
+    if (sim > CLUE_SIM_CEILING) continue;
 
     const alpha = norm2 > 0 ? (dot * 127) / norm2 : 0;
     if (alpha <= 0.05) continue;
     const candidate = { row: r, alpha, score: norm2 > 0 ? (dot * dot) / norm2 : 0, dot, norm2 };
-    if (sim >= MIN_CLUE_SIM && sim <= cap) {
+    const coherentWithGuess = guessSim >= MIN_CLUE_GUESS_SIM;
+    if (sim >= MIN_CLUE_SIM && coherentWithGuess) {
       relevant = better({ ...candidate, score: sim }, relevant);
+    } else if (sim >= MIN_CLUE_SIM && sim <= fallbackCap) {
+      relaxedRelevant = better({ ...candidate, score: sim }, relaxedRelevant);
     }
-    if (sim >= progressFloor && sim <= cap) strict = better(candidate, strict);
+    if (sim >= progressFloor && coherentWithGuess) {
+      strict = better(candidate, strict);
+    } else if (sim >= progressFloor && sim <= fallbackCap) {
+      relaxedStrict = better(candidate, relaxedStrict);
+    }
   }
 
   const similarityPercentile = percentile(answerSimilarities, similarity);
-  const chosen = strict ?? relevant;
+  const chosen = strict ?? relevant ?? relaxedStrict ?? relaxedRelevant;
   if (!chosen) {
     return {
       word: '',
@@ -449,6 +463,7 @@ export function nearestToDifference(
   }
 
   let pair: PairCandidate | null = null;
+  let relaxedPair: PairCandidate | null = null;
   const firstNorm2 = chosen.norm2 / (127 * 127);
   const firstDeltaDot = chosen.dot / 127;
   const singleFit = firstDeltaDot * chosen.alpha;
@@ -457,7 +472,7 @@ export function nearestToDifference(
     if (!vocab.hints[r]) continue;
     if (contradictsAnswerPolarity(vocab.words[answerRow], vocab.words[r])) continue;
     const sim = answerSimilarities[r];
-    if (sim < MIN_CLUE_SIM || sim > cap) continue;
+    if (sim < MIN_CLUE_SIM || sim > CLUE_SIM_CEILING) continue;
     if (
       related(vocab, r, guessRow) ||
       related(vocab, r, answerRow) ||
@@ -471,12 +486,16 @@ export function nearestToDifference(
     let secondDeltaDotRaw = 0;
     let secondNorm2Raw = 0;
     let crossRaw = 0;
+    let guessDotRaw = 0;
     for (let j = 0; j < dim; j++) {
       const secondByte = vocab.bytes[base + j];
       secondDeltaDotRaw += delta[j] * secondByte;
       secondNorm2Raw += secondByte * secondByte;
       crossRaw += vocab.bytes[firstBase + j] * secondByte;
+      guessDotRaw += guess[j] * secondByte;
     }
+    const coherentWithGuess = guessDotRaw / 127 >= MIN_CLUE_GUESS_SIM;
+    if (!coherentWithGuess && sim > fallbackCap) continue;
     const secondNorm2 = secondNorm2Raw / (127 * 127);
     const cross = crossRaw / (127 * 127);
     const distinctSimilarity = cross / Math.sqrt(firstNorm2 * secondNorm2);
@@ -492,10 +511,14 @@ export function nearestToDifference(
     if (firstAlpha <= 0.05 || secondAlpha <= 0.05 || firstAlpha > 2 || secondAlpha > 2) continue;
 
     const score = firstAlpha * firstDeltaDot + secondAlpha * secondDeltaDot;
-    if (score <= singleFit || (pair && score <= pair.score)) continue;
-    pair = { row: r, firstAlpha, secondAlpha, score };
+    const currentPair = coherentWithGuess ? pair : relaxedPair;
+    if (score <= singleFit || (currentPair && score <= currentPair.score)) continue;
+    const candidatePair = { row: r, firstAlpha, secondAlpha, score };
+    if (coherentWithGuess) pair = candidatePair;
+    else relaxedPair = candidatePair;
   }
 
+  pair ??= relaxedPair;
   if (pair) {
     const firstMultiplier = Math.max(0.1, Math.round(pair.firstAlpha * 10) / 10);
     const secondMultiplier = Math.max(0.1, Math.round(pair.secondAlpha * 10) / 10);

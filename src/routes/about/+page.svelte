@@ -67,16 +67,19 @@
     <div class="formula"><code>α = (Δᵀc) / (cᵀc)</code></div>
     <p>
       A candidate must be a positive directional step (<code>α &gt; 0.05</code>), come from the curated hint pool,
-      and not be the guess, answer, a used word, or a close morphological variant. It must also be at least
-      <code>25%</code> similar to the answer. The upper similarity limit is:
+      and not be the guess, answer, a used word, or a close morphological variant. It must be at least
+      <code>25%</code> similar to the answer, with answer similarity capped at <code>90%</code>. The engine prefers
+      candidates that are also at least <code>20%</code> similar to the guess.
     </p>
-    <div class="formula"><code>cap = clamp(s(g, a) + 0.35, 0.50, 0.90)</code></div>
+    <div class="formula"><code>s(c, g) ≥ 0.20</code></div>
     <p>
-      The preferred candidate makes at least <code>0.02</code> progress over the guess while staying below that cap.
-      Among those candidates, the engine chooses the strongest directional projection. If none qualifies, it falls
-      back to the most answer-relevant candidate within the same range. The coefficient shown in the UI is rounded
-      to one decimal place.
+      The preferred candidate makes at least <code>0.02</code> progress over the guess. Among those candidates, the
+      engine chooses the strongest directional projection. If no otherwise-safe candidate meets the <code>20%</code>
+      guess-similarity preference, the engine relaxes that preference and returns the best eligible fallback, using
+      the original dynamic answer-similarity cap:
     </p>
+    <div class="formula"><code>fallback cap = clamp(s(g, a) + 0.35, 0.50, 0.90)</code></div>
+    <p>The coefficient shown in the UI is rounded to one decimal place.</p>
   </section>
 
   <section>
@@ -98,17 +101,17 @@
     </p>
     <div class="formula"><code>ζ ≈ g + αc + βd</code></div>
     <p>
-      The second word must be answer-relevant (at least <code>25%</code> and below the same cap), sufficiently distinct
-      from the first (cosine similarity no greater than <code>0.75</code>), and have a coefficient between
-      <code>0.05</code> and <code>2.0</code>. 
+      The second word follows the same answer-similarity limits, <code>20%</code> guess-similarity preference, and
+      fallback cap. It must also be sufficiently distinct from the first (cosine similarity no greater than
+      <code>0.75</code>) and have a coefficient between <code>0.05</code> and <code>2.0</code>.
     </p>
   </section>
 
   <section>
     <h2>6. Decomposition guesses</h2>
     <p>
-      A decomposition spends one turn to ask the engine for a semantic recipe for the hidden word. Unlike a normal
-      hint, it does not have to preserve a player-supplied guess:
+      After four guesses, a decomposition can spend one turn to ask the engine for a semantic recipe for the hidden
+      word. Unlike a normal hint, it does not have to preserve a player-supplied guess:
     </p>
     <div class="formula"><code>ζ ≈ αc + βd (+ γe)</code></div>
     <p>

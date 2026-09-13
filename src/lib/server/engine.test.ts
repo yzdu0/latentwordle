@@ -40,7 +40,7 @@ const entries = {
   cat: [1, 0, 0],
   wolf: [0, 1, 0],
   moon: [0, 0.6, 0.8],
-  forest: [0.2, 0.4, 0.9],
+  forest: [0.25, 0.4, 0.88],
   puppy: [0.2, 0.98, 0],
   wolfs: [0.1, 0.99, 0],
 };
@@ -67,27 +67,25 @@ describe('isVariant', () => {
   });
 });
 
-describe('clueSimilarityCap', () => {
-  it('keeps early clues indirect and lets later clues get warmer', () => {
+describe('nearestToDifference', () => {
+  it('retains the dynamic cap used by relaxed fallbacks', () => {
     expect(clueSimilarityCap(0)).toBe(0.5);
     expect(clueSimilarityCap(0.4)).toBeCloseTo(0.75);
     expect(clueSimilarityCap(0.8)).toBe(0.9);
   });
-});
 
-describe('nearestToDifference', () => {
   it('returns a scaled hint', () => {
     const store = new FakeVocabStore(entries);
     const clue = nearestToDifference(store.vocab, store.vocab.index.get('cat')!, store.vocab.index.get('wolf')!);
     expect(clue.word).toBe('forest');
-    expect(clue.multiplier).toBe(0.2);
+    expect(clue.multiplier).toBe(0.1);
   });
 
   it('rejects negative projections in favor of a positive hint', () => {
     const store = new FakeVocabStore({
       cat: [1, 0, 0],
       wolf: [0, 1, 0],
-      forest: [0.2, 0.4, 0.9],
+      forest: [0.25, 0.4, 0.88],
       lair: [0.6, 0.3, 0.74],
     });
     const clue = nearestToDifference(store.vocab, store.vocab.index.get('cat')!, store.vocab.index.get('wolf')!);
@@ -118,16 +116,29 @@ describe('nearestToDifference', () => {
     expect(clue.multiplier).toBeNull();
   });
 
-  it('respects the dynamic similarity cap', () => {
+  it('prefers hints that are at least 20% similar to the guess', () => {
     const store = new FakeVocabStore({
       cat: [1, 0, 0],
       wolf: [0, 1, 0],
-      twin: [0.1, 0.99, 0.05],
-      far: [0.2, 0.4, 0.9],
+      detour: [-0.2, 0.6, 0.77],
+      bridge: [0.25, 0.5, 0.83],
     });
     const clue = nearestToDifference(store.vocab, store.vocab.index.get('cat')!, store.vocab.index.get('wolf')!);
-    expect(clue.word).not.toBe('twin');
-    expect(clue.word).toBe('far');
+    expect(clue.word).not.toBe('detour');
+    expect(clue.word).toBe('bridge');
+  });
+
+  it('falls back to an otherwise-safe hint when none reaches 20% guess similarity', () => {
+    const store = new FakeVocabStore({
+      cat: [1, 0, 0],
+      wolf: [0, 1, 0],
+      shortcut: [0.1, 0.8, 0.59],
+      rescue: [0.1, 0.48, 0.87],
+    });
+    const clue = nearestToDifference(store.vocab, store.vocab.index.get('cat')!, store.vocab.index.get('wolf')!);
+    expect(clue.word).not.toBe('shortcut');
+    expect(clue.word).toBe('rescue');
+    expect(clue.multiplier).toBeGreaterThan(0);
   });
 
   it('does not return a variant of the guess', () => {
@@ -135,7 +146,7 @@ describe('nearestToDifference', () => {
       election: [1, 0, 0],
       elections: [0.99, 0.01, 0],
       winter: [0, 1, 0],
-      snow: [0.2, 0.4, 0.9],
+      snow: [0.25, 0.4, 0.88],
     });
     const clue = nearestToDifference(
       store.vocab,
@@ -161,11 +172,14 @@ describe('nearestToDifference', () => {
   it('uses a two-word fit when its landing is materially warmer', () => {
     const store = new FakeVocabStore({
       guess: [1, 0, 0, 0],
-      target: [0, 1, 0, 0],
-      north: [-0.5, 0.4, 0.768, 0],
-      norths: [-0.5, 0.8, 0, 0.3],
-      south: [-0.5, 0.4, -0.768, 0],
-      bridge: [-0.5, 0.8, 0, 0.332],
+      target: [0.270401, 0.394706, -0.44532, -0.756823],
+      decoy1: [-0.76201, -0.348323, 0.278976, 0.469237],
+      decoy2: [-0.26904, 0.595971, 0.647681, 0.391083],
+      north: [0.413117, 0.494035, -0.764986, -0.007702],
+      decoy3: [0.374591, -0.742175, 0.517225, -0.203314],
+      bridge: [0.522278, -0.096001, -0.754284, -0.386089],
+      decoy4: [0.59317, -0.050899, -0.603397, 0.530538],
+      south: [0.35367, 0.167853, 0.53272, -0.750301],
     });
     const clue = nearestToDifference(
       store.vocab,
@@ -176,7 +190,7 @@ describe('nearestToDifference', () => {
     expect(clue.secondMultiplier).toBeGreaterThan(0);
     expect(clue.sumWord).toBe('bridge');
     expect(clue.suggestion).toBe('bridge');
-    expect(clue.sumSimilarity).toBeGreaterThanOrEqual(0.79);
+    expect(clue.sumSimilarity).toBeGreaterThanOrEqual(0.73);
   });
 });
 
@@ -292,7 +306,7 @@ describe('computeView', () => {
         similarity: 0,
         similarityPercentile: 0.167,
         clue: 'forest',
-        multiplier: 0.2,
+        multiplier: 0.1,
         clueSimilarity: 0.402,
         concept: null,
         conceptScore: null,

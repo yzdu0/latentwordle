@@ -1030,9 +1030,10 @@
                     a clue for which direction to explore.
                 </li>
                 <li>
-                    Decompose / auto guess: Spend a guess to let the engine
-                    build the hidden word from two, or occasionally three, clue
-                    words. The fit percentage measures the complete combination.
+                    Decompose / auto guess: After four guesses, spend one more
+                    to let the engine build the hidden word from two, or
+                    occasionally three, clue words. The fit percentage measures
+                    the complete combination.
                 </li>
                 <li>
                     Concept guesses: These show where the hidden word falls
@@ -1092,9 +1093,11 @@
                 both positive coefficients together. The two-word form is shown
                 only when its nearest real-word landing is significantly closer
                 than the best one-word result. Hints come from a curated pool,
-                are at least 25% related to the answer, avoid word-form repeats,
-                never name the hidden word, and become more direct as your
-                guesses get closer.
+                are at least 25% related to the answer, and prefer words at
+                least 20% related to your guess. If none fit, the engine uses
+                the best otherwise-safe fallback, capped at your guess's answer
+                similarity plus 35 percentage points. Hints avoid word-form
+                repeats, never name the hidden word, and stay below 90% answer similarity.
             </p>
             <a class="help method-link" href={`${base}/about`}>How it works</a>
             <button class="primary done" onclick={() => dialog?.close()}

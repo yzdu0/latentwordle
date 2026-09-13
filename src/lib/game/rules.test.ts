@@ -122,7 +122,7 @@ describe('replay', () => {
     expect(result.state.current.solved).toBe(false);
   });
 
-  it('does not allow a decomposition probe before five guesses', () => {
+  it('does not allow a decomposition probe before four guesses', () => {
     const result = replay([{ type: 'decomposition' }], ['shark'], { rounds: 1 });
     expect(result).toEqual({
       ok: false,
@@ -134,7 +134,7 @@ describe('replay', () => {
     });
   });
 
-  it('uses a decomposition probe as a turn after five guesses', () => {
+  it('uses a decomposition probe as a turn after four guesses', () => {
     const result = replay(
       [...Array.from({ length: DECOMPOSITION_UNLOCK_TURN }, () => guess('fish')), { type: 'decomposition' }],
       ['shark'],

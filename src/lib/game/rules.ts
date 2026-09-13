@@ -4,7 +4,7 @@ import type { ConceptKey } from './concepts.ts';
 
 export const MAX_TURNS = 10;
 export const MAX_ROUNDS = 5;
-export const DECOMPOSITION_UNLOCK_TURN = 5;
+export const DECOMPOSITION_UNLOCK_TURN = 4;
 
 export interface NormalizedGuess {
   type: 'guess';

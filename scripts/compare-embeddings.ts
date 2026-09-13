@@ -5,6 +5,7 @@ import {
   CLUE_SIM_CEILING,
   CLUE_SIM_FLOOR,
   CLUE_SIM_MARGIN,
+  MIN_CLUE_GUESS_SIM,
   MIN_CLUE_PROGRESS,
   MIN_CLUE_SIM,
 } from '../src/lib/game/config.ts';
@@ -81,11 +82,13 @@ function selectClue(
 ): SelectedClue | null {
   const guessSimilarity = similarity(bundle, guessRow, answerRow);
   const floor = Math.max(MIN_CLUE_SIM, guessSimilarity + MIN_CLUE_PROGRESS);
-  const cap = clueSimilarityCap(guessSimilarity);
+  const fallbackCap = clueSimilarityCap(guessSimilarity);
   const guessBase = guessRow * bundle.dim;
   const answerBase = answerRow * bundle.dim;
   let strict: { row: number; score: number; alpha: number; answerSimilarity: number } | null = null;
   let fallback: { row: number; score: number; alpha: number; answerSimilarity: number } | null = null;
+  let relaxedStrict: { row: number; score: number; alpha: number; answerSimilarity: number } | null = null;
+  let relaxedFallback: { row: number; score: number; alpha: number; answerSimilarity: number } | null = null;
 
   for (let row = 0; row < bundle.words.length; row++) {
     if (!bundle.hints[row] || row === guessRow || row === answerRow || excludedRows.has(row)) continue;
@@ -102,26 +105,41 @@ function selectClue(
       answerDot += bundle.vectors[answerBase + column] * candidate;
     }
     const answerSimilarity = answerDot / (127 * 127);
-    if (answerSimilarity < MIN_CLUE_SIM || answerSimilarity > cap || norm2 === 0) continue;
+    const candidateGuessSimilarity = similarity(bundle, guessRow, row);
+    if (
+      answerSimilarity < MIN_CLUE_SIM ||
+      answerSimilarity > CLUE_SIM_CEILING ||
+      norm2 === 0
+    ) {
+      continue;
+    }
     const alpha = (deltaDotRaw * 127) / norm2;
     if (alpha <= 0.05) continue;
+    const coherentWithGuess = candidateGuessSimilarity >= MIN_CLUE_GUESS_SIM;
 
-    if (!fallback || answerSimilarity > fallback.score) {
+    if (coherentWithGuess && (!fallback || answerSimilarity > fallback.score)) {
       fallback = { row, score: answerSimilarity, alpha, answerSimilarity };
+    } else if (
+      !coherentWithGuess &&
+      answerSimilarity <= fallbackCap &&
+      (!relaxedFallback || answerSimilarity > relaxedFallback.score)
+    ) {
+      relaxedFallback = { row, score: answerSimilarity, alpha, answerSimilarity };
     }
     if (answerSimilarity >= floor) {
       const projectionScore = (deltaDotRaw * deltaDotRaw) / norm2;
-      if (
-        !strict ||
-        projectionScore > strict.score ||
-        (projectionScore === strict.score && alpha > strict.alpha)
-      ) {
-        strict = { row, score: projectionScore, alpha, answerSimilarity };
+      const current = coherentWithGuess ? strict : relaxedStrict;
+      if (!current || projectionScore > current.score || (projectionScore === current.score && alpha > current.alpha)) {
+        const candidate = { row, score: projectionScore, alpha, answerSimilarity };
+        if (coherentWithGuess) strict = candidate;
+        else if (answerSimilarity <= fallbackCap) relaxedStrict = candidate;
       }
     }
   }
   if (strict) return { ...strict, fallback: false };
   if (fallback) return { ...fallback, fallback: true };
+  if (relaxedStrict) return { ...relaxedStrict, fallback: true };
+  if (relaxedFallback) return { ...relaxedFallback, fallback: true };
   return null;
 }
 
@@ -281,7 +299,7 @@ for (const bundle of bundles) {
   const similarityBenchmark = simLex.filter((pair) => bundle.rows.has(pair.left) && bundle.rows.has(pair.right));
   const simLexRho = pearson(
     rank(similarityBenchmark.map((pair) => pair.human)),
-    rank(similarityBenchmark.map((pair) => similarity(bundle, bundle.rows.get(pair.left)!, bundle.rows.get(pair.right)!)),
+    rank(similarityBenchmark.map((pair) => similarity(bundle, bundle.rows.get(pair.left)!, bundle.rows.get(pair.right)!))),
   );
   console.log(
     `${bundle.model.padEnd(34)} ${String(bundle.words.length).padStart(5)}   ${rho.toFixed(3)}       ${simLexRho.toFixed(3)}       ` +
