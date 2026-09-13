@@ -10,7 +10,7 @@ export function gameRounds(): number {
 }
 
 export function dailySalt(): number {
-  if (!dev) return 0;
-  const configured = Number(env.LOCAL_SEED);
-  return Number.isFinite(configured) ? configured : fallbackSeed;
+  const configured = Number(dev ? env.LOCAL_SEED : env.DAILY_SEED);
+  if (Number.isFinite(configured)) return configured;
+  return dev ? fallbackSeed : 0;
 }
