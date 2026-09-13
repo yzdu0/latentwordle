@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_ROUNDS, MAX_TURNS, normalizeWord, replay, roundEnded } from './rules.ts';
+import { DECOMPOSITION_UNLOCK_TURN, MAX_ROUNDS, MAX_TURNS, normalizeWord, replay, roundEnded } from './rules.ts';
 
 const answers = ['shark', 'volcano', 'library', 'courage', 'honey'];
 const guess = (word: string) => ({ type: 'guess', word });
@@ -122,14 +122,30 @@ describe('replay', () => {
     expect(result.state.current.solved).toBe(false);
   });
 
-  it('uses a decomposition probe as a turn without solving the round', () => {
+  it('does not allow a decomposition probe before five guesses', () => {
     const result = replay([{ type: 'decomposition' }], ['shark'], { rounds: 1 });
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        error: 'invalid_action',
+        actionIndex: 0,
+        detail: `decomposition unlocks after ${DECOMPOSITION_UNLOCK_TURN} guesses`,
+      },
+    });
+  });
+
+  it('uses a decomposition probe as a turn after five guesses', () => {
+    const result = replay(
+      [...Array.from({ length: DECOMPOSITION_UNLOCK_TURN }, () => guess('fish')), { type: 'decomposition' }],
+      ['shark'],
+      { rounds: 1 },
+    );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.state.current.turns[0]).toEqual({
+    expect(result.state.current.turns[DECOMPOSITION_UNLOCK_TURN]).toEqual({
       type: 'decomposition',
-      turn: 1,
-      actionIndex: 0,
+      turn: DECOMPOSITION_UNLOCK_TURN + 1,
+      actionIndex: DECOMPOSITION_UNLOCK_TURN,
     });
     expect(result.state.current.solved).toBe(false);
   });

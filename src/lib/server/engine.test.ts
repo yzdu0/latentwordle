@@ -3,7 +3,7 @@ import type { GameRef } from '$lib/game/types.ts';
 import type { Puzzle, Store, Vocab } from './store.ts';
 import { clueSimilarityCap, computeView, decomposeTarget, isVariant, nearestToDifference } from './engine.ts';
 import { stem } from '$lib/game/morphology.ts';
-import { MAX_TURNS } from '$lib/game/rules.ts';
+import { DECOMPOSITION_UNLOCK_TURN, MAX_TURNS } from '$lib/game/rules.ts';
 import { l2normalize, quantize } from '$lib/game/scoring.ts';
 import { conceptByKey } from '$lib/game/concepts.ts';
 
@@ -233,16 +233,18 @@ describe('computeView', () => {
       { store },
       game,
       ['target'],
-      [{ type: 'decomposition' }],
+      [
+        ...Array.from({ length: DECOMPOSITION_UNLOCK_TURN }, () => ({ type: 'guess' as const, word: 'east' })),
+        { type: 'decomposition' },
+      ],
       1,
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.view.turnsUsed).toBe(1);
-    expect(result.view.score).toBe(0);
-    expect(result.view.history[0]).toMatchObject({
+    expect(result.view.turnsUsed).toBe(DECOMPOSITION_UNLOCK_TURN + 1);
+    expect(result.view.score).toBeGreaterThan(0);
+    expect(result.view.history[DECOMPOSITION_UNLOCK_TURN]).toMatchObject({
       type: 'decomposition',
-      similarity: 1,
     });
   });
 

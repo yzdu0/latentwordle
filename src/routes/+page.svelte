@@ -3,6 +3,7 @@
     import { dev } from "$app/environment";
     import { base } from "$app/paths";
     import { CONCEPTS } from "$lib/game/concepts.ts";
+    import { DECOMPOSITION_UNLOCK_TURN } from "$lib/game/rules.ts";
     import type {
         Action,
         GameRef,
@@ -79,6 +80,9 @@
     const roundDone = $derived(view ? view.roundEnded : false);
     const dayDone = $derived(view ? view.finished : false);
     const hardMode = $derived(view?.game.kind === "hard");
+    const decompositionReady = $derived(
+        view ? view.turnsUsed >= DECOMPOSITION_UNLOCK_TURN : false,
+    );
     const guessesLeft = $derived(view ? view.maxTurns - view.turnsUsed : 0);
     const roundResults = $derived(
         view ? [...view.results].sort((a, b) => a.index - b.index) : [],
@@ -465,7 +469,7 @@
     }
 
     async function requestDecomposition() {
-        if (busy || roundDone || dayDone) return;
+        if (busy || roundDone || dayDone || !decompositionReady) return;
         await post([...actions, { type: "decomposition" }]);
     }
 
@@ -970,8 +974,10 @@
             <div class="probe-actions">
                 <button
                     class="help decomposition-button"
-                    disabled={busy}
-                    title="Spend one guess to express the hidden word as a combination of clue words"
+                    disabled={busy || !decompositionReady}
+                    title={decompositionReady
+                        ? "Spend one guess to express the hidden word as a combination of clue words"
+                        : `Available after ${DECOMPOSITION_UNLOCK_TURN} guesses`}
                     onclick={requestDecomposition}
                     >decompose ζ (auto guess)</button
                 >

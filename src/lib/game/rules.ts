@@ -4,6 +4,7 @@ import type { ConceptKey } from './concepts.ts';
 
 export const MAX_TURNS = 10;
 export const MAX_ROUNDS = 5;
+export const DECOMPOSITION_UNLOCK_TURN = 5;
 
 export interface NormalizedGuess {
   type: 'guess';
@@ -105,6 +106,16 @@ export function replay(rawActions: unknown, answers: string[], options: ReplayOp
     }
 
     if (action?.type === 'decomposition') {
+      if (round.turns.length < DECOMPOSITION_UNLOCK_TURN) {
+        return {
+          ok: false,
+          error: {
+            error: 'invalid_action',
+            actionIndex: i,
+            detail: `decomposition unlocks after ${DECOMPOSITION_UNLOCK_TURN} guesses`,
+          },
+        };
+      }
       round.turns.push({
         type: 'decomposition',
         turn: round.turns.length + 1,
