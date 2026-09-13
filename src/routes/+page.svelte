@@ -121,12 +121,6 @@
     return Array.from({ length: 4 }, (_, index) => new Date(day - index * 86_400_000).toISOString().slice(0, 10));
   }
 
-  function dayLabel(index: number): string {
-    if (index === 0) return 'Today';
-    if (index === 1) return 'Yesterday';
-    return `${index} days ago`;
-  }
-
   function updateCountdown(): void {
     const now = new Date();
     const next = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
@@ -385,18 +379,18 @@
 
   <div class="daily-controls">
     {#if playableDates.length}
-      <nav class="day-picker" aria-label="Choose a daily game">
-        {#each playableDates as date, index}
-          <button
-            type="button"
-            class:active={date === selectedDate}
-            aria-current={date === selectedDate ? 'date' : undefined}
-            title={date}
-            disabled={busy}
-            onclick={() => void selectDate(date)}
-          >{dayLabel(index)}</button>
-        {/each}
-      </nav>
+      <label class="archive-picker">
+        <span>Archive</span>
+        <input
+          type="date"
+          aria-label="Choose a daily game"
+          value={selectedDate}
+          min={playableDates.at(-1)}
+          max={playableDates[0]}
+          disabled={busy}
+          onchange={(event) => void selectDate(event.currentTarget.value)}
+        />
+      </label>
     {/if}
     <p class="countdown">Next game in <strong>{nextGameIn || '00:00:00'}</strong> UTC</p>
   </div>
@@ -559,8 +553,8 @@
           placeholder={conceptGuess
             ? `concept: ${CONCEPTS.find((concept) => concept.key === conceptGuess)?.label ?? conceptGuess}`
             : guessesLeft === 1
-              ? 'guess a word — 1 left'
-              : `guess a word — ${guessesLeft} left`}
+              ? 'guess a word - 1 left'
+              : `guess a word - ${guessesLeft} left`}
           autocomplete="off"
           autocapitalize="off"
           spellcheck="false"
@@ -726,27 +720,31 @@
     margin-bottom: 18px;
   }
 
-  .day-picker {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 7px;
-  }
-
-  .day-picker button {
-    border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
-    border-radius: 9px;
-    padding: 7px 10px;
-    background: var(--surface);
+  .archive-picker {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 9px 7px 11px;
+    border-radius: 10px;
+    background: var(--track);
     color: var(--muted);
     font-size: 14px;
     font-weight: 700;
     box-shadow: var(--shadow-sm);
   }
 
-  .day-picker button.active {
-    border-color: var(--brand);
-    background: var(--brand);
+  .archive-picker input {
+    max-width: 190px;
+    border: 0;
+    outline: none;
+    background: transparent;
     color: var(--text);
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .archive-picker:focus-within {
+    background: color-mix(in srgb, var(--brand) 28%, var(--surface));
   }
 
   .countdown {
@@ -836,20 +834,20 @@
     align-items: center;
     justify-content: center;
     border-radius: var(--radius);
-    background: var(--surface);
+    background: var(--track);
     padding: 9px 13px;
     font-size: 16px;
     color: var(--text);
     font-weight: 700;
     text-decoration: none;
-    border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
+    border: 0;
     box-shadow: var(--shadow-sm);
     transition: filter 160ms ease, box-shadow 160ms ease;
   }
 
   .help:hover:not(:disabled) {
     color: var(--text);
-    background: var(--track);
+    background: color-mix(in srgb, var(--brand) 28%, var(--surface));
     box-shadow: var(--shadow-md);
   }
 
@@ -1139,6 +1137,7 @@
   .help:focus-visible,
   .close:focus-visible {
     color: var(--text);
+    background: color-mix(in srgb, var(--brand) 36%, var(--surface));
   }
 
   .entry button:focus-visible,
@@ -1346,18 +1345,18 @@
     width: 34px;
     height: 34px;
     border-radius: 50%;
-    background: var(--surface);
+    background: var(--track);
     color: var(--muted);
     font-size: 24px;
     line-height: 1;
     padding: 0;
-    border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
+    border: 0;
     box-shadow: var(--shadow-sm);
   }
 
   .close:hover {
     color: var(--text);
-    background: var(--track);
+    background: color-mix(in srgb, var(--brand) 28%, var(--surface));
     box-shadow: var(--shadow-md);
   }
 
@@ -1386,12 +1385,13 @@
       flex-direction: column;
     }
 
-    .day-picker {
+    .archive-picker {
       width: 100%;
     }
 
-    .day-picker button {
+    .archive-picker input {
       flex: 1;
+      max-width: none;
     }
 
     .brand {

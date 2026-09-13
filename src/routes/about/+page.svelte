@@ -173,6 +173,11 @@
     box-shadow: var(--shadow-md);
   }
 
+  .back:focus-visible {
+    outline: none;
+    background: color-mix(in srgb, var(--brand) 72%, var(--surface));
+  }
+
   h1 {
     margin: 0 0 12px;
     font-size: clamp(32px, 6vw, 48px);
