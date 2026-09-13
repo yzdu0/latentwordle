@@ -70,8 +70,11 @@
       ? Math.max(0, Math.min(histogram.bins.length - 1, Math.floor(view.score / histogram.bucketSize)))
       : -1,
   );
+  const SHARE_CACHE_VERSION = 2;
   const shareLink = $derived(
-    typeof window === 'undefined' ? `${base}/` : new URL(`${base}/`, window.location.origin).toString(),
+    typeof window === 'undefined'
+      ? `${base}/?v=${SHARE_CACHE_VERSION}`
+      : new URL(`${base}/?v=${SHARE_CACHE_VERSION}`, window.location.origin).toString(),
   );
   const shareText = $derived.by(() => {
     const gameView = view;
