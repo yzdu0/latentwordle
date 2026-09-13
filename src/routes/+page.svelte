@@ -29,7 +29,7 @@
   const SUBMISSION_ID_RE = /^[a-zA-Z0-9_-]{16,128}$/;
   const EMPTY_STATS: Stats = { streak: 0, max: 0, lastDate: null, played: 0, won: 0, score: 0, best: 0 };
   const ERROR_TEXT: Record<string, string> = {
-    not_a_word: 'Not a word I know — try another.',
+    not_a_word: 'Not a word I know. Try another.',
     action_limit: 'No guesses left.',
     game_over: 'This game is over.',
     bad_request: 'That move did not make sense.',
@@ -86,7 +86,7 @@
       })
       .join('\n');
     return [
-      `LatentGuess — ${gameLabel}`,
+      `LatentGuess: ${gameLabel}`,
       `ζ ${solved}/${gameView.rounds} words found`,
       '',
       scorecard,
@@ -341,13 +341,14 @@
 
 <svelte:head>
   <title>LatentGuess - Vector word guessing</title>
+  <link rel="canonical" href="https://nphard.app/latent/" />
   <meta
     name="description"
     content="Find the hidden word using word embeddings, vector hints, and concept probes."
   />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://nphard.app/latent/" />
-  <meta property="og:title" content="LatentGuess — Vector word guessing" />
+  <meta property="og:title" content="LatentGuess: Vector word guessing" />
   <meta
     property="og:description"
     content="Find the hidden word using GloVe embeddings, vector hints, and concept probes."
@@ -358,7 +359,7 @@
   <meta property="og:image:height" content="630" />
   <meta property="og:image:alt" content="LatentGuess: vector word guessing with a zeta hidden-word marker" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="LatentGuess — Vector word guessing" />
+  <meta name="twitter:title" content="LatentGuess: Vector word guessing" />
   <meta
     name="twitter:description"
     content="Find ζ, the hidden word. Follow vector hints and semantic axes through a 300-dimensional latent space."
@@ -401,7 +402,7 @@
     <div class="status">
       <span class="meta">
         Round {view.round + 1}/{view.rounds}
-        {#if !roundDone}— {guessesLeft} {guessesLeft === 1 ? 'guess' : 'guesses'} left{/if}
+        {#if !roundDone}, {guessesLeft} {guessesLeft === 1 ? 'guess' : 'guesses'} left{/if}
       </span>
       <div class="progress" aria-hidden="true">
         <div class="progress-fill" style:width={`${(view.turnsUsed / view.maxTurns) * 100}%`}></div>
@@ -414,11 +415,11 @@
         {#each roundResults as result (result.index)}
           <span
             class="round-chip {result.solved ? 'good' : 'bad'}"
-            title={`${result.answer} — ${result.solved
+            title={`${result.answer}: ${result.solved
               ? `solved in ${result.turnsUsed}`
               : result.givenUp
                 ? 'gave up'
-                : 'out of guesses'} — ${result.score} pts`}
+                : 'out of guesses'}, ${result.score} pts`}
           >
             <strong>{result.answer}</strong>
             <span class="round-meta">
@@ -690,6 +691,10 @@
 
   .brand-latent {
     color: var(--brand);
+    background: var(--brand-gradient);
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
   }
 
   .tagline {
@@ -834,10 +839,10 @@
     align-items: center;
     justify-content: center;
     border-radius: var(--radius);
-    background: var(--track);
+    background: var(--button-bg);
     padding: 9px 13px;
     font-size: 16px;
-    color: var(--text);
+    color: var(--button-text);
     font-weight: 700;
     text-decoration: none;
     border: 0;
@@ -846,8 +851,8 @@
   }
 
   .help:hover:not(:disabled) {
-    color: var(--text);
-    background: color-mix(in srgb, var(--brand) 28%, var(--surface));
+    color: var(--button-text);
+    background: var(--button-hover);
     box-shadow: var(--shadow-md);
   }
 
@@ -1102,8 +1107,8 @@
     border: 0;
     border-radius: var(--radius);
     padding: 13px 22px;
-    background: var(--brand);
-    color: var(--text);
+    background: var(--button-bg);
+    color: var(--button-text);
     box-shadow: var(--shadow-sm);
     font-weight: 600;
     transition:
@@ -1113,16 +1118,17 @@
 
   .entry button:hover:not(:disabled),
   .over button:hover:not(:disabled) {
+    background: var(--button-hover);
     box-shadow: var(--shadow-md);
   }
 
   button.primary {
-    background: var(--brand);
-    color: var(--text);
+    background: var(--button-bg);
+    color: var(--button-text);
   }
 
   button.primary:hover:not(:disabled) {
-    filter: brightness(1.2);
+    background: var(--button-hover);
   }
 
   button:disabled {
@@ -1136,8 +1142,8 @@
 
   .help:focus-visible,
   .close:focus-visible {
-    color: var(--text);
-    background: color-mix(in srgb, var(--brand) 36%, var(--surface));
+    color: var(--button-text);
+    background: var(--button-hover);
   }
 
   .entry button:focus-visible,
@@ -1345,8 +1351,8 @@
     width: 34px;
     height: 34px;
     border-radius: 50%;
-    background: var(--track);
-    color: var(--muted);
+    background: var(--button-bg);
+    color: var(--button-text);
     font-size: 24px;
     line-height: 1;
     padding: 0;
@@ -1355,8 +1361,8 @@
   }
 
   .close:hover {
-    color: var(--text);
-    background: color-mix(in srgb, var(--brand) 28%, var(--surface));
+    color: var(--button-text);
+    background: var(--button-hover);
     box-shadow: var(--shadow-md);
   }
 

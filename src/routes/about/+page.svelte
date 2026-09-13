@@ -4,6 +4,7 @@
 
 <svelte:head>
   <title>How it works</title>
+  <link rel="canonical" href="https://nphard.app/latent/about" />
   <meta
     name="description"
     content="The word embeddings, vector arithmetic, hint selection, and scoring used by LatentGuess."
@@ -161,21 +162,21 @@
     margin-bottom: 22px;
     padding: 9px 13px;
     border-radius: var(--radius);
-    background: var(--brand);
-    color: var(--text);
+    background: var(--button-bg);
+    color: var(--button-text);
     font-weight: 700;
     text-decoration: none;
     box-shadow: var(--shadow-sm);
   }
 
   .back:hover {
-    filter: brightness(1.05);
+    background: var(--button-hover);
     box-shadow: var(--shadow-md);
   }
 
   .back:focus-visible {
     outline: none;
-    background: color-mix(in srgb, var(--brand) 72%, var(--surface));
+    background: var(--button-hover);
   }
 
   h1 {

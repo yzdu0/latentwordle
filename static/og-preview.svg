@@ -1,17 +1,33 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title description">
-  <title id="title">LatentGuess — Vector word guessing</title>
+  <title id="title">LatentGuess: Vector word guessing</title>
   <desc id="description">Find zeta, the hidden word, using vector hints and semantic axes in GloVe space.</desc>
+  <defs>
+    <linearGradient id="brand-gradient" x1="132" y1="318" x2="218" y2="404" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ff9500" />
+      <stop offset="0.5" stop-color="#ffb000" />
+      <stop offset="0.76" stop-color="#ffc72b" />
+      <stop offset="0.9" stop-color="#b9db4f" />
+      <stop offset="1" stop-color="#6ee477" />
+    </linearGradient>
+    <linearGradient id="wordmark-gradient" x1="100" y1="0" x2="292" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ff9500" />
+      <stop offset="0.5" stop-color="#ffb000" />
+      <stop offset="0.76" stop-color="#ffc72b" />
+      <stop offset="0.9" stop-color="#b9db4f" />
+      <stop offset="1" stop-color="#6ee477" />
+    </linearGradient>
+  </defs>
   <rect width="1200" height="630" fill="#ffffff"/>
   <rect x="46" y="46" width="1108" height="538" rx="34" fill="#ffffff" stroke="#e2ddd4" stroke-width="3"/>
   <circle cx="1060" cy="130" r="210" fill="#ffad1f" opacity="0.14"/>
   <circle cx="1120" cy="560" r="170" fill="#3d7a5c" opacity="0.08"/>
   <text x="100" y="148" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="54" font-weight="900" letter-spacing="-2" fill="#211e19">
-    <tspan fill="#ffad1f">Latent</tspan><tspan>Guess</tspan>
+    <tspan fill="url(#wordmark-gradient)">Latent</tspan><tspan>Guess</tspan>
   </text>
   <text x="100" y="220" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="30" fill="#5f5a54">Find the hidden word in vector space.</text>
   <rect x="100" y="286" width="1000" height="150" rx="20" fill="#f0ece4"/>
-  <rect x="132" y="318" width="86" height="86" rx="16" fill="#211e19"/>
-  <text x="175" y="381" text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="56" fill="#ffffff">ζ</text>
+  <rect x="132" y="318" width="86" height="86" rx="16" fill="url(#brand-gradient)"/>
+  <text x="175" y="381" text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="56" font-weight="800" fill="#171717">ζ</text>
   <text x="252" y="378" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="42" font-weight="700" fill="#6b665f">≈</text>
   <rect x="315" y="318" width="232" height="86" rx="14" fill="#ffffff" stroke="#d7d0c6" stroke-width="2"/>
   <text x="431" y="371" text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="30" font-weight="700" fill="#211e19">guess</text>
