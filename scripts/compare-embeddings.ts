@@ -66,17 +66,29 @@ function clueSimilarityCap(value: number): number {
   return Math.min(CLUE_SIM_CEILING, Math.max(CLUE_SIM_FLOOR, value + CLUE_SIM_MARGIN));
 }
 
-function selectClue(bundle: Bundle, guessRow: number, answerRow: number): number | null {
+interface SelectedClue {
+  row: number;
+  alpha: number;
+  answerSimilarity: number;
+  fallback: boolean;
+}
+
+function selectClue(
+  bundle: Bundle,
+  guessRow: number,
+  answerRow: number,
+  excludedRows: ReadonlySet<number> = new Set(),
+): SelectedClue | null {
   const guessSimilarity = similarity(bundle, guessRow, answerRow);
   const floor = Math.max(MIN_CLUE_SIM, guessSimilarity + MIN_CLUE_PROGRESS);
   const cap = clueSimilarityCap(guessSimilarity);
   const guessBase = guessRow * bundle.dim;
   const answerBase = answerRow * bundle.dim;
-  let strict: { row: number; score: number; alpha: number } | null = null;
-  let fallback: { row: number; score: number; alpha: number } | null = null;
+  let strict: { row: number; score: number; alpha: number; answerSimilarity: number } | null = null;
+  let fallback: { row: number; score: number; alpha: number; answerSimilarity: number } | null = null;
 
   for (let row = 0; row < bundle.words.length; row++) {
-    if (!bundle.hints[row] || row === guessRow || row === answerRow) continue;
+    if (!bundle.hints[row] || row === guessRow || row === answerRow || excludedRows.has(row)) continue;
     if (related(bundle, row, guessRow) || related(bundle, row, answerRow)) continue;
     const base = row * bundle.dim;
     let deltaDotRaw = 0;
@@ -95,7 +107,7 @@ function selectClue(bundle: Bundle, guessRow: number, answerRow: number): number
     if (alpha <= 0.05) continue;
 
     if (!fallback || answerSimilarity > fallback.score) {
-      fallback = { row, score: answerSimilarity, alpha };
+      fallback = { row, score: answerSimilarity, alpha, answerSimilarity };
     }
     if (answerSimilarity >= floor) {
       const projectionScore = (deltaDotRaw * deltaDotRaw) / norm2;
@@ -104,11 +116,13 @@ function selectClue(bundle: Bundle, guessRow: number, answerRow: number): number
         projectionScore > strict.score ||
         (projectionScore === strict.score && alpha > strict.alpha)
       ) {
-        strict = { row, score: projectionScore, alpha };
+        strict = { row, score: projectionScore, alpha, answerSimilarity };
       }
     }
   }
-  return (strict ?? fallback)?.row ?? null;
+  if (strict) return { ...strict, fallback: false };
+  if (fallback) return { ...fallback, fallback: true };
+  return null;
 }
 
 function rank(values: number[]): number[] {
@@ -141,6 +155,7 @@ function pearson(left: number[], right: number[]): number {
 }
 
 function median(values: number[]): number {
+  if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
@@ -171,6 +186,18 @@ function loadWordSim(zipPath: string): { left: string; right: string; human: num
     });
 }
 
+function loadSimLex(file: string): { left: string; right: string; human: number }[] {
+  return fs
+    .readFileSync(file, 'utf8')
+    .split(/\r?\n/)
+    .slice(1)
+    .filter(Boolean)
+    .map((line) => {
+      const columns = line.split('\t');
+      return { left: columns[0].toLowerCase(), right: columns[1].toLowerCase(), human: Number(columns[3]) };
+    });
+}
+
 function random(seed: number): () => number {
   return () => {
     seed |= 0;
@@ -185,40 +212,174 @@ const glove = loadBundle(argValue('glove') ?? path.join(ROOT, '.cache/dev-glove'
 const word2vec = loadBundle(argValue('word2vec') ?? path.join(ROOT, '.cache/dev-word2vec'));
 const bundles = [glove, word2vec];
 const wordSim = loadWordSim(argValue('wordsim') ?? path.join(ROOT, '.cache/wordsim353.zip'));
+const simLex = loadSimLex(argValue('simlex') ?? path.join(ROOT, '.cache/SimLex-999/SimLex-999.txt'));
 
 const commonAnswers = glove.puzzles
   .map(({ answer }) => answer)
   .filter((answer) => word2vec.rows.has(answer));
 const commonGuesses = glove.words.filter((word, row) => glove.hints[row] && word2vec.hints[word2vec.rows.get(word) ?? -1]);
 const rng = random(0x1a7e17);
-const samples = Array.from({ length: 240 }, () => ({
-  answer: commonAnswers[Math.floor(rng() * commonAnswers.length)],
-  guess: commonGuesses[Math.floor(rng() * commonGuesses.length)],
-}));
+const bandDefinitions = [
+  { name: 'cold (<10%)', min: -Infinity, max: 0.1 },
+  { name: 'cool (10-25%)', min: 0.1, max: 0.25 },
+  { name: 'warm (25-45%)', min: 0.25, max: 0.45 },
+  { name: 'hot (45%+)', min: 0.45, max: Infinity },
+] as const;
+const samplesByBand = new Map(bandDefinitions.map((band) => [band.name, [] as { answer: string; guess: string }[]]));
+for (let attempts = 0; attempts < 2_000_000; attempts++) {
+  if ([...samplesByBand.values()].every((samples) => samples.length >= 100)) break;
+  const answer = commonAnswers[Math.floor(rng() * commonAnswers.length)];
+  const guess = commonGuesses[Math.floor(rng() * commonGuesses.length)];
+  if (answer === guess) continue;
+  const averageSimilarity =
+    (similarity(glove, glove.rows.get(guess)!, glove.rows.get(answer)!) +
+      similarity(word2vec, word2vec.rows.get(guess)!, word2vec.rows.get(answer)!)) /
+    2;
+  const band = bandDefinitions.find(({ min, max }) => averageSimilarity >= min && averageSimilarity < max)!;
+  const samples = samplesByBand.get(band.name)!;
+  if (samples.length < 100) samples.push({ answer, guess });
+}
+const samples = [...samplesByBand.values()].flat();
 
-console.log('model                              vocab   WS353 rho/pairs   clue coverage   improves   median gain');
+const frequencyRanks = new Map<string, number>();
+fs.readFileSync(path.join(ROOT, '.cache/en_50k.txt'), 'utf8')
+  .split('\n')
+  .filter(Boolean)
+  .forEach((line, index) => frequencyRanks.set(line.slice(0, line.indexOf(' ')), index + 1));
+
+const femaleTerms = new Set(
+  'woman women female feminine girl girls lady ladies mother mothers mom moms mommy mama sister sisters wife wives daughter daughters aunt aunts grandmother grandma queen princess girlfriend bride'.split(' '),
+);
+const maleTerms = new Set(
+  'man men male masculine boy boys gentleman gentlemen father fathers dad dads daddy brother brothers husband husbands son sons uncle uncles grandfather grandpa king prince boyfriend groom'.split(' '),
+);
+const neutralTerms = 'person people parent parents child children family families baby babies adult human relative sibling'.split(' ');
+
+console.log('model                              vocab   WS353 rho   SimLex rho   clue coverage   improves   median gain');
 for (const bundle of bundles) {
   const benchmark = wordSim.filter((pair) => bundle.rows.has(pair.left) && bundle.rows.has(pair.right));
   const human = benchmark.map((pair) => pair.human);
   const predicted = benchmark.map((pair) => similarity(bundle, bundle.rows.get(pair.left)!, bundle.rows.get(pair.right)!));
   const gains: number[] = [];
+  const clueRanks: number[] = [];
   let available = 0;
   let improves = 0;
+  let fallbacks = 0;
   for (const sample of samples) {
     const guessRow = bundle.rows.get(sample.guess)!;
     const answerRow = bundle.rows.get(sample.answer)!;
-    const clueRow = selectClue(bundle, guessRow, answerRow);
-    if (clueRow === null) continue;
+    const clue = selectClue(bundle, guessRow, answerRow);
+    if (!clue) continue;
     available++;
-    const gain = similarity(bundle, clueRow, answerRow) - similarity(bundle, guessRow, answerRow);
+    if (clue.fallback) fallbacks++;
+    const gain = clue.answerSimilarity - similarity(bundle, guessRow, answerRow);
     gains.push(gain);
+    clueRanks.push(frequencyRanks.get(bundle.words[clue.row]) ?? 50_001);
     if (gain > 0) improves++;
   }
   const rho = pearson(rank(human), rank(predicted));
+  const similarityBenchmark = simLex.filter((pair) => bundle.rows.has(pair.left) && bundle.rows.has(pair.right));
+  const simLexRho = pearson(
+    rank(similarityBenchmark.map((pair) => pair.human)),
+    rank(similarityBenchmark.map((pair) => similarity(bundle, bundle.rows.get(pair.left)!, bundle.rows.get(pair.right)!)),
+  );
   console.log(
-    `${bundle.model.padEnd(34)} ${String(bundle.words.length).padStart(5)}   ${rho.toFixed(3)} / ${String(benchmark.length).padStart(3)}     ` +
+    `${bundle.model.padEnd(34)} ${String(bundle.words.length).padStart(5)}   ${rho.toFixed(3)}       ${simLexRho.toFixed(3)}       ` +
       `${(available / samples.length * 100).toFixed(1).padStart(5)}%       ` +
       `${(improves / Math.max(1, available) * 100).toFixed(1).padStart(5)}%      ` +
       `${(median(gains) * 100).toFixed(1).padStart(5)} pts`,
   );
+
+  console.log('  starting band       clues   improves   median gain   median clue sim');
+  for (const band of bandDefinitions) {
+    const rows = samplesByBand.get(band.name)!;
+    const bandGains: number[] = [];
+    const clueSimilarities: number[] = [];
+    const examples: string[] = [];
+    for (const sample of rows) {
+      const guessRow = bundle.rows.get(sample.guess)!;
+      const answerRow = bundle.rows.get(sample.answer)!;
+      const clue = selectClue(bundle, guessRow, answerRow);
+      if (!clue) continue;
+      bandGains.push(clue.answerSimilarity - similarity(bundle, guessRow, answerRow));
+      clueSimilarities.push(clue.answerSimilarity);
+      if (examples.length < 4) {
+        examples.push(
+          `${sample.answer} <- ${sample.guess} + ${bundle.words[clue.row]} ` +
+            `(${(similarity(bundle, guessRow, answerRow) * 100).toFixed(0)}->${(clue.answerSimilarity * 100).toFixed(0)})`,
+        );
+      }
+    }
+    console.log(
+      `  ${band.name.padEnd(18)} ${String(bandGains.length).padStart(3)}/${String(rows.length).padEnd(3)} ` +
+        `${percentage(bandGains.filter((gain) => gain > 0).length, bandGains.length).padStart(9)}   ` +
+        `${(median(bandGains) * 100).toFixed(1).padStart(8)} pts   ` +
+        `${(median(clueSimilarities) * 100).toFixed(1).padStart(8)}%`,
+    );
+    console.log(`    ${examples.join('; ')}`);
+  }
+
+  const chainFinalGains: number[] = [];
+  let stalledChains = 0;
+  let repeatedChains = 0;
+  for (const sample of samplesByBand.get('cold (<10%)')!.slice(0, 40)) {
+    const answerRow = bundle.rows.get(sample.answer)!;
+    let guessRow = bundle.rows.get(sample.guess)!;
+    const initialSimilarity = similarity(bundle, guessRow, answerRow);
+    const used = new Set<number>([guessRow]);
+    let repeated = false;
+    for (let step = 0; step < 5; step++) {
+      const clue = selectClue(bundle, guessRow, answerRow, used);
+      if (!clue) {
+        stalledChains++;
+        break;
+      }
+      if (used.has(clue.row)) repeated = true;
+      used.add(clue.row);
+      guessRow = clue.row;
+    }
+    if (repeated) repeatedChains++;
+    chainFinalGains.push(similarity(bundle, guessRow, answerRow) - initialSimilarity);
+  }
+
+  const femaleAnswers = [...femaleTerms].filter((word) => bundle.puzzles.some(({ answer }) => answer === word));
+  const maleAnswers = [...maleTerms].filter((word) => bundle.puzzles.some(({ answer }) => answer === word));
+  const genderGuesses = [...femaleTerms, ...maleTerms, ...neutralTerms].filter((word) => bundle.rows.has(word));
+  let genderCases = 0;
+  let oppositeGenderClues = 0;
+  const genderExamples: string[] = [];
+  for (const [answers, oppositeTerms] of [
+    [femaleAnswers, maleTerms],
+    [maleAnswers, femaleTerms],
+  ] as const) {
+    for (const answer of answers) {
+      for (const guess of genderGuesses) {
+        if (guess === answer) continue;
+        const clue = selectClue(bundle, bundle.rows.get(guess)!, bundle.rows.get(answer)!);
+        if (!clue) continue;
+        genderCases++;
+        const clueWord = bundle.words[clue.row];
+        if (!oppositeTerms.has(clueWord)) continue;
+        oppositeGenderClues++;
+        if (genderExamples.length < 6) genderExamples.push(`${answer} <- ${guess} + ${clueWord}`);
+      }
+    }
+  }
+
+  console.log(
+    `  fallback clues ${percentage(fallbacks, available)}; median frequency rank ${Math.round(median(clueRanks))}; ` +
+      `rank >20k ${percentage(clueRanks.filter((rank) => rank > 20_000).length, clueRanks.length)}`,
+  );
+  console.log(
+    `  follow-clue chains: median 5-step gain ${(median(chainFinalGains) * 100).toFixed(1)} pts; ` +
+      `stalled ${stalledChains}/40; repeated ${repeatedChains}/40`,
+  );
+  console.log(
+    `  gender audit: explicit opposite-gender clues ${oppositeGenderClues}/${genderCases} ` +
+      `(${percentage(oppositeGenderClues, genderCases)}); ${genderExamples.join('; ') || 'no examples'}`,
+  );
+}
+
+function percentage(numerator: number, denominator: number): string {
+  return `${((100 * numerator) / Math.max(1, denominator)).toFixed(1)}%`;
 }

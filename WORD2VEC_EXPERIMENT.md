@@ -8,6 +8,8 @@ The runtime representation did not change: vectors are still L2-normalized, quan
 
 ## Results
 
+The initial results below motivated the switch. A later stratified audit found important limitations in the hint objective, especially near the answer and for gender-coded words; see [HINT_HELPFULNESS_INVESTIGATION.md](HINT_HELPFULNESS_INVESTIGATION.md).
+
 Both models were quantized through the production seed path before measurement.
 
 | Model | Vocabulary | WordSim-353 Spearman rho | Pairs covered | Hint coverage | Hints improving direct similarity | Median direct gain |
@@ -32,6 +34,8 @@ node scripts/seed.ts --embedding=word2vec --output=.cache/dev-word2vec --sql=.ca
 
 # Download the CC BY 4.0 benchmark once:
 curl -L -o .cache/wordsim353.zip https://www.gabrilovich.com/resources/data/wordsim353/wordsim353.zip
+curl -L -o .cache/SimLex-999.zip https://fh295.github.io/SimLex-999.zip
+unzip -oq .cache/SimLex-999.zip -d .cache
 npm run compare:embeddings
 ```
 

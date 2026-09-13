@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { GameRef } from '$lib/game/types.ts';
 import type { Puzzle, Store, Vocab } from './store.ts';
-import { clueSimilarityCap, computeView, isVariant, nearestToDifference } from './engine.ts';
+import { clueSimilarityCap, computeView, decomposeTarget, isVariant, nearestToDifference } from './engine.ts';
 import { stem } from '$lib/game/morphology.ts';
 import { MAX_TURNS } from '$lib/game/rules.ts';
 import { l2normalize, quantize } from '$lib/game/scoring.ts';
@@ -180,7 +180,72 @@ describe('nearestToDifference', () => {
   });
 });
 
+describe('decomposeTarget', () => {
+  it('finds a two-word positive combination close to the target', () => {
+    const store = new FakeVocabStore({
+      target: [1, 1, 0],
+      east: [1, 0, 0],
+      north: [0, 1, 0],
+      depth: [0, 0, 1],
+    });
+    const result = decomposeTarget(store.vocab, store.vocab.index.get('target')!);
+    expect(result).not.toBeNull();
+    expect(result?.terms).toHaveLength(2);
+    expect(result?.terms.map((term) => term.word).sort()).toEqual(['east', 'north']);
+    expect(result?.similarity).toBeGreaterThan(0.99);
+    expect(result?.terms.every((term) => term.multiplier > 0)).toBe(true);
+  });
+
+  it('adds a third word only when it materially improves the fit', () => {
+    const store = new FakeVocabStore({
+      target: [1, 1, 1],
+      east: [1, 0, 0],
+      north: [0, 1, 0],
+      depth: [0, 0, 1],
+    });
+    const result = decomposeTarget(store.vocab, store.vocab.index.get('target')!);
+    expect(result?.terms).toHaveLength(3);
+    expect(result?.terms.map((term) => term.word).sort()).toEqual(['depth', 'east', 'north']);
+    expect(result?.similarity).toBeGreaterThan(0.99);
+  });
+
+  it('does not use an explicitly contradictory gender term', () => {
+    const store = new FakeVocabStore({
+      mama: [1, 1, 0],
+      mother: [1, 0, 0],
+      dude: [0, 1, 0],
+      family: [0, 1, 0.2],
+    });
+    const result = decomposeTarget(store.vocab, store.vocab.index.get('mama')!);
+    expect(result?.terms.map(({ word }) => word)).not.toContain('dude');
+  });
+});
+
 describe('computeView', () => {
+  it('returns an engine-generated decomposition as a zero-point turn', async () => {
+    const store = new FakeVocabStore({
+      target: [1, 1, 0],
+      east: [1, 0, 0],
+      north: [0, 1, 0],
+      depth: [0, 0, 1],
+    });
+    const result = await computeView(
+      { store },
+      game,
+      ['target'],
+      [{ type: 'decomposition' }],
+      1,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.view.turnsUsed).toBe(1);
+    expect(result.view.score).toBe(0);
+    expect(result.view.history[0]).toMatchObject({
+      type: 'decomposition',
+      similarity: 1,
+    });
+  });
+
   it('projects concept guesses onto an averaged semantic axis', async () => {
     const plurality = conceptByKey('plurality')!;
     const conceptEntries: Record<string, number[]> = { target: [1, 0, 0] };

@@ -5,6 +5,7 @@ export type GameRef = { kind: 'daily'; date: string } | { kind: 'random'; seed: 
 export type Action =
   | { type: 'guess'; word: string }
   | { type: 'concept'; concept: ConceptKey }
+  | { type: 'decomposition' }
   | { type: 'giveup' }
   | { type: 'next' };
 
@@ -44,7 +45,21 @@ export interface GiveUpEntry {
   turn: number;
 }
 
-export type HistoryEntry = GuessEntry | GiveUpEntry;
+export interface DecompositionTerm {
+  word: string;
+  multiplier: number;
+  similarity: number;
+}
+
+export interface DecompositionEntry {
+  type: 'decomposition';
+  turn: number;
+  terms: DecompositionTerm[];
+  similarity: number;
+  similarityPercentile: number;
+}
+
+export type HistoryEntry = GuessEntry | DecompositionEntry | GiveUpEntry;
 
 export interface RoundSummary {
   index: number;

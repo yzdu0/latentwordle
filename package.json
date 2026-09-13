@@ -29,6 +29,8 @@
     "spike:calibrate": "node spike/calibrate.ts",
     "spike:simulate": "node spike/simulate.ts",
     "spike:lexical": "node spike/lexical.ts",
+    "spike:hint-audit": "node spike/hint-audit.ts",
+    "spike:decomposition": "node spike/decomposition-audit.ts",
     "spike:glove": "node spike/glove.ts",
     "spike:verify-workers-ai": "node spike/verify-workers-ai.ts"
   },

@@ -307,6 +307,11 @@
     await post([...actions, { type: 'giveup' }]);
   }
 
+  async function requestDecomposition() {
+    if (busy || roundDone || dayDone) return;
+    await post([...actions, { type: 'decomposition' }]);
+  }
+
   async function nextWord() {
     if (busy || !roundDone || dayDone) return;
     await post([...actions, { type: 'next' }]);
@@ -480,6 +485,28 @@
                 </span>
               {/if}
             </div>
+          {:else if entry.type === 'decomposition'}
+            <div class="row decomposition-row">
+              {#if entry.terms.length}
+                <div
+                  class="equation decomposition-equation"
+                  aria-label={`Hidden word approximately equals ${entry.terms.map((term) => `${term.multiplier.toFixed(1)} times ${term.word}`).join(' plus ')}; combined fit ${signedPercent(entry.similarity)}`}
+                >
+                  <span class="hidden-word" title="Hidden word">ζ</span>
+                  <span class="operator result" aria-hidden="true">≈</span>
+                  {#each entry.terms as term, termIndex}
+                    {#if termIndex > 0}<span class="operator" aria-hidden="true">+</span>{/if}
+                    <span class="term decomposition-term {simTone(term.similarity)}">
+                      <span><span class="mult">{term.multiplier.toFixed(1)} ×</span>{term.word}</span>
+                      <span class="term-sim">{signedPercent(term.similarity)}</span>
+                    </span>
+                  {/each}
+                  <span class="combination-fit {simTone(entry.similarity)}">fit {signedPercent(entry.similarity)}</span>
+                </div>
+              {:else}
+                <span class="muted">No safe decomposition found.</span>
+              {/if}
+            </div>
           {:else}
             <div class="row giveup-row">
               <span class="muted">gave up</span>
@@ -570,7 +597,13 @@
         <button class="primary guess-button" type="submit" disabled={busy || (!guessInput.trim() && !conceptGuess)}>Guess</button>
       </form>
       {#if error}<p class="error">{error}</p>{/if}
-      <div class="give-up">
+      <div class="probe-actions">
+        <button
+          class="help decomposition-button"
+          disabled={busy}
+          title="Spend one guess to express the hidden word as a combination of clue words"
+          onclick={requestDecomposition}
+        >decompose ζ (auto guess)</button>
         <button class="help" onclick={giveUp}>give up</button>
       </div>
     {/if}
@@ -601,6 +634,7 @@
         <ul>
         <li>Similarity: The percentage shows how close your guess (or another word) is in meaning to the hidden word. Higher is better.</li>
         <li>Word equation: After making a guess, an equation combining your guess with one or two other words is displayed. This is a clue for which direction to explore. </li>
+        <li>Decompose / auto guess: Spend a guess to let the engine build the hidden word from two, or occasionally three, clue words. The fit percentage measures the complete combination.</li>
         <li>Concept guesses: These show where the hidden word falls between two opposite ideas, such as singular ↔ plural. The percentages show which side the hidden word is closer to.</li>
         </ul>
     <p>For example, the game learns the idea of plurality from patterns like cat → cats, dog → dogs, and house → houses.</p>
@@ -614,7 +648,8 @@
       <p>
         Guessing the hidden word, or a close form of it like <em>employed</em> for <em>employment</em>, solves
         the round. Each word guess scores its similarity, and solving early adds up to 2,000 points. Concept probes
-        consume a guess but add no similarity points. Give up to skip a word, then share your five results.
+        consume a guess but add no similarity points. Decomposition probes also consume a guess and add no points, but
+        produce a combination chosen independently of your previous word. Give up to skip a word, then share your five results.
         <br>
         <br>
         Similarity does <em>not</em> directly measure meaning or define a category; it measures how similarly words are
@@ -979,6 +1014,38 @@
     color: var(--brand);
   }
 
+  .decomposition-row {
+    border-color: color-mix(in srgb, var(--brand) 22%, transparent);
+  }
+
+  .decomposition-term {
+    background: color-mix(in srgb, var(--brand) 12%, transparent);
+    color: var(--brand);
+  }
+
+  .combination-fit {
+    margin-left: auto;
+    padding: 4px 7px;
+    border-radius: 6px;
+    background: var(--track);
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .combination-fit.good {
+    color: var(--good);
+  }
+
+  .combination-fit.mid {
+    color: var(--mid);
+  }
+
+  .combination-fit.bad {
+    color: var(--bad);
+  }
+
   .term-sim {
     padding-left: 5px;
     border-left: 1px solid color-mix(in srgb, currentColor 24%, transparent);
@@ -1049,13 +1116,17 @@
     color: var(--muted);
   }
 
-  .give-up {
+  .probe-actions {
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 10px;
     margin-top: 16px;
     font-size: 16px;
+  }
+
+  .decomposition-button {
+    color: var(--accent);
   }
 
   .site-links {

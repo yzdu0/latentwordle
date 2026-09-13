@@ -104,7 +104,28 @@
   </section>
 
   <section>
-    <h2>6. Concept guesses</h2>
+    <h2>6. Decomposition guesses</h2>
+    <p>
+      A decomposition spends one turn to ask the engine for a semantic recipe for the hidden word. Unlike a normal
+      hint, it does not have to preserve a player-supplied guess:
+    </p>
+    <div class="formula"><code>ζ ≈ αc + βd (+ γe)</code></div>
+    <p>
+      The engine shortlists answer-related words from the curated hint pool, rejects the answer, used words, close
+      word-form variants, overly similar components, then solves for
+      positive least-squares coefficients. The displayed coefficients are rounded to one decimal place before the fit
+      is measured.
+    </p>
+    <p>
+      Two words are preferred. A third is included only when it raises cosine fit by at least five percentage points.
+      The displayed <strong>fit</strong> is the cosine similarity between the complete recipe and the hidden word—not
+      the similarity of any individual ingredient. Decompositions award no similarity points, but they use a turn and
+      therefore reduce the remaining solve bonus.
+    </p>
+  </section>
+
+  <section>
+    <h2>7. Concept guesses</h2>
     <p>
       Concept guesses use directions in the embedding space, not similarity to a concept's name. Each direction has a
       positive pole and a negative pole. Most are made by averaging several normalized contrast vectors:

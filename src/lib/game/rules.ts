@@ -17,11 +17,18 @@ export interface NormalizedGiveUp {
   type: 'giveup';
 }
 
-export type NormalizedAction = NormalizedGuess | NormalizedGiveUp;
+export interface NormalizedDecomposition {
+  type: 'decomposition';
+  turn: number;
+  actionIndex: number;
+}
+
+export type NormalizedAction = NormalizedGuess | NormalizedDecomposition | NormalizedGiveUp;
+export type NormalizedTurn = NormalizedGuess | NormalizedDecomposition;
 
 export interface NormalizedRound {
   index: number;
-  turns: NormalizedGuess[];
+  turns: NormalizedTurn[];
   givenUp: boolean;
   solved: boolean;
 }
@@ -94,6 +101,16 @@ export function replay(rawActions: unknown, answers: string[], options: ReplayOp
     if (action?.type === 'giveup') {
       round.givenUp = true;
       if (round.index >= rounds - 1) state.finished = true;
+      continue;
+    }
+
+    if (action?.type === 'decomposition') {
+      round.turns.push({
+        type: 'decomposition',
+        turn: round.turns.length + 1,
+        actionIndex: i,
+      });
+      if (round.turns.length >= maxTurns && round.index >= rounds - 1) state.finished = true;
       continue;
     }
 

@@ -9,6 +9,7 @@ import {
   VARIANT_SIM_MIN,
 } from '$lib/game/config.ts';
 import { stem } from '$lib/game/morphology.ts';
+import { contradictsAnswerPolarity } from '$lib/game/semantic-safety.ts';
 import { conceptByKey } from '$lib/game/concepts.ts';
 import { MAX_ROUNDS, MAX_TURNS, replay, roundEnded } from '$lib/game/rules.ts';
 import type { GameError, GameRef, GameView, HistoryEntry, RoundSummary } from '$lib/game/types.ts';
@@ -34,6 +35,12 @@ export interface Clue {
   suggestion: string;
   suggestionSimilarity: number;
   suggestionPercentile: number;
+}
+
+export interface Decomposition {
+  terms: { word: string; multiplier: number; similarity: number }[];
+  similarity: number;
+  similarityPercentile: number;
 }
 
 export type EngineResult = { ok: true; view: GameView } | { ok: false; error: GameError };
@@ -80,6 +87,207 @@ function percentile(values: Float32Array, value: number): number {
   return Math.round((atOrBelow / values.length) * 1000) / 1000;
 }
 
+const DECOMPOSITION_SHORTLIST = 160;
+const DECOMPOSITION_MIN_COMPONENT_SIM = 0.18;
+const DECOMPOSITION_MAX_COMPONENT_SIM = 0.72;
+const DECOMPOSITION_MAX_PAIR_SIM = 0.78;
+const DECOMPOSITION_MIN_COEFFICIENT = 0.05;
+const DECOMPOSITION_MAX_COEFFICIENT = 2.5;
+const DECOMPOSITION_TRIPLE_MIN_GAIN = 0.05;
+
+interface DecompositionCandidate {
+  row: number;
+  targetDot: number;
+  norm2: number;
+}
+
+interface DecompositionFit {
+  rows: number[];
+  coefficients: number[];
+  similarity: number;
+}
+
+function solveThree(matrix: number[][], values: number[]): number[] | null {
+  const augmented = matrix.map((row, index) => [...row, values[index]]);
+  for (let column = 0; column < 3; column++) {
+    let pivot = column;
+    for (let row = column + 1; row < 3; row++) {
+      if (Math.abs(augmented[row][column]) > Math.abs(augmented[pivot][column])) pivot = row;
+    }
+    if (Math.abs(augmented[pivot][column]) < 1e-8) return null;
+    [augmented[column], augmented[pivot]] = [augmented[pivot], augmented[column]];
+    const scale = augmented[column][column];
+    for (let entry = column; entry < 4; entry++) augmented[column][entry] /= scale;
+    for (let row = 0; row < 3; row++) {
+      if (row === column) continue;
+      const factor = augmented[row][column];
+      for (let entry = column; entry < 4; entry++) {
+        augmented[row][entry] -= factor * augmented[column][entry];
+      }
+    }
+  }
+  return augmented.map((row) => row[3]);
+}
+
+/**
+ * Express the hidden vector as a positive combination of two hint-safe words,
+ * adding a third only when it materially improves the rounded playable fit.
+ */
+export function decomposeTarget(
+  vocab: Vocab,
+  answerRow: number,
+  excludedRows: ReadonlySet<number> = new Set(),
+): Decomposition | null {
+  const dim = vocab.dim;
+  const answerBase = answerRow * dim;
+  let answerNorm2 = 0;
+  for (let column = 0; column < dim; column++) {
+    const value = vocab.bytes[answerBase + column] / 127;
+    answerNorm2 += value * value;
+  }
+
+  const answerSimilarities = new Float32Array(vocab.words.length);
+  const candidates: DecompositionCandidate[] = [];
+  for (let row = 0; row < vocab.words.length; row++) {
+    const base = row * dim;
+    let targetDot = 0;
+    let norm2 = 0;
+    for (let column = 0; column < dim; column++) {
+      const value = vocab.bytes[base + column] / 127;
+      targetDot += value * (vocab.bytes[answerBase + column] / 127);
+      norm2 += value * value;
+    }
+    answerSimilarities[row] = targetDot;
+    if (
+      row === answerRow ||
+      excludedRows.has(row) ||
+      !vocab.hints[row] ||
+      related(vocab, row, answerRow) ||
+      contradictsAnswerPolarity(vocab.words[answerRow], vocab.words[row]) ||
+      targetDot < DECOMPOSITION_MIN_COMPONENT_SIM ||
+      targetDot > DECOMPOSITION_MAX_COMPONENT_SIM
+    ) {
+      continue;
+    }
+    candidates.push({ row, targetDot, norm2 });
+  }
+  candidates.sort((left, right) => right.targetDot - left.targetDot || left.row - right.row);
+  candidates.length = Math.min(candidates.length, DECOMPOSITION_SHORTLIST);
+  if (candidates.length < 2) return null;
+
+  const cross = new Map<string, number>();
+  const rowDot = (left: number, right: number): number => {
+    const key = left < right ? `${left}:${right}` : `${right}:${left}`;
+    const cached = cross.get(key);
+    if (cached !== undefined) return cached;
+    let dot = 0;
+    const leftBase = left * dim;
+    const rightBase = right * dim;
+    for (let column = 0; column < dim; column++) {
+      dot += (vocab.bytes[leftBase + column] * vocab.bytes[rightBase + column]) / (127 * 127);
+    }
+    cross.set(key, dot);
+    return dot;
+  };
+
+  const candidateByRow = new Map(candidates.map((candidate) => [candidate.row, candidate]));
+  const evaluate = (rows: number[], rawCoefficients: number[]): DecompositionFit | null => {
+    if (
+      rawCoefficients.some(
+        (coefficient) =>
+          !Number.isFinite(coefficient) ||
+          coefficient <= DECOMPOSITION_MIN_COEFFICIENT ||
+          coefficient > DECOMPOSITION_MAX_COEFFICIENT,
+      )
+    ) {
+      return null;
+    }
+    const coefficients = rawCoefficients.map((coefficient) => Math.max(0.1, Math.round(coefficient * 10) / 10));
+    let targetDot = 0;
+    let norm2 = 0;
+    for (let left = 0; left < rows.length; left++) {
+      const candidate = candidateByRow.get(rows[left])!;
+      targetDot += coefficients[left] * candidate.targetDot;
+      norm2 += coefficients[left] * coefficients[left] * candidate.norm2;
+      for (let right = left + 1; right < rows.length; right++) {
+        norm2 += 2 * coefficients[left] * coefficients[right] * rowDot(rows[left], rows[right]);
+      }
+    }
+    if (norm2 <= 1e-9) return null;
+    return { rows, coefficients, similarity: targetDot / Math.sqrt(norm2 * answerNorm2) };
+  };
+
+  const pairFits: DecompositionFit[] = [];
+  for (let left = 0; left < candidates.length; left++) {
+    const a = candidates[left];
+    for (let right = left + 1; right < candidates.length; right++) {
+      const b = candidates[right];
+      if (related(vocab, a.row, b.row)) continue;
+      const ab = rowDot(a.row, b.row);
+      if (ab / Math.sqrt(a.norm2 * b.norm2) > DECOMPOSITION_MAX_PAIR_SIM) continue;
+      const determinant = a.norm2 * b.norm2 - ab * ab;
+      if (determinant <= 1e-8) continue;
+      const fit = evaluate(
+        [a.row, b.row],
+        [
+          (a.targetDot * b.norm2 - b.targetDot * ab) / determinant,
+          (b.targetDot * a.norm2 - a.targetDot * ab) / determinant,
+        ],
+      );
+      if (fit) pairFits.push(fit);
+    }
+  }
+  pairFits.sort((left, right) => right.similarity - left.similarity);
+  const bestPair = pairFits[0];
+  if (!bestPair) return null;
+
+  let bestTriple: DecompositionFit | null = null;
+  for (const pair of pairFits.slice(0, 32)) {
+    const [firstRow, secondRow] = pair.rows;
+    const first = candidateByRow.get(firstRow)!;
+    const second = candidateByRow.get(secondRow)!;
+    const firstSecond = rowDot(firstRow, secondRow);
+    for (const third of candidates) {
+      if (pair.rows.includes(third.row)) continue;
+      if (related(vocab, firstRow, third.row) || related(vocab, secondRow, third.row)) continue;
+      const firstThird = rowDot(firstRow, third.row);
+      const secondThird = rowDot(secondRow, third.row);
+      if (
+        firstThird / Math.sqrt(first.norm2 * third.norm2) > DECOMPOSITION_MAX_PAIR_SIM ||
+        secondThird / Math.sqrt(second.norm2 * third.norm2) > DECOMPOSITION_MAX_PAIR_SIM
+      ) {
+        continue;
+      }
+      const coefficients = solveThree(
+        [
+          [first.norm2, firstSecond, firstThird],
+          [firstSecond, second.norm2, secondThird],
+          [firstThird, secondThird, third.norm2],
+        ],
+        [first.targetDot, second.targetDot, third.targetDot],
+      );
+      if (!coefficients) continue;
+      const fit = evaluate([firstRow, secondRow, third.row], coefficients);
+      if (fit && (!bestTriple || fit.similarity > bestTriple.similarity)) bestTriple = fit;
+    }
+  }
+
+  const chosen =
+    bestTriple && bestTriple.similarity >= bestPair.similarity + DECOMPOSITION_TRIPLE_MIN_GAIN
+      ? bestTriple
+      : bestPair;
+  const similarity = Math.round(chosen.similarity * 1000) / 1000;
+  return {
+    terms: chosen.rows.map((row, index) => ({
+      word: vocab.words[row],
+      multiplier: chosen.coefficients[index],
+      similarity: Math.round(answerSimilarities[row] * 1000) / 1000,
+    })),
+    similarity,
+    similarityPercentile: percentile(answerSimilarities, similarity),
+  };
+}
+
 interface Candidate {
   row: number;
   alpha: number;
@@ -115,6 +323,7 @@ function nearestLanding(
     if (r === guessRow || r === answerRow || excludedRows.has(r) || componentRows.has(r)) continue;
     if (!vocab.hints[r] || answerSimilarities[r] > CLUE_SIM_CEILING) continue;
     if (related(vocab, r, guessRow) || related(vocab, r, answerRow)) continue;
+    if (contradictsAnswerPolarity(vocab.words[answerRow], vocab.words[r])) continue;
     let componentVariant = false;
     for (const componentRow of componentRows) {
       if (related(vocab, r, componentRow)) {
@@ -177,6 +386,7 @@ export function nearestToDifference(
     if (r === guessRow || r === answerRow || excludedRows.has(r)) continue;
     if (!vocab.hints[r]) continue;
     if (related(vocab, r, guessRow) || related(vocab, r, answerRow)) continue;
+    if (contradictsAnswerPolarity(vocab.words[answerRow], vocab.words[r])) continue;
 
     const alpha = norm2 > 0 ? (dot * 127) / norm2 : 0;
     if (alpha <= 0.05) continue;
@@ -245,6 +455,7 @@ export function nearestToDifference(
   for (let r = 0; r < vocab.words.length; r++) {
     if (r === guessRow || r === answerRow || r === chosen.row || excludedRows.has(r)) continue;
     if (!vocab.hints[r]) continue;
+    if (contradictsAnswerPolarity(vocab.words[answerRow], vocab.words[r])) continue;
     const sim = answerSimilarities[r];
     if (sim < MIN_CLUE_SIM || sim > cap) continue;
     if (
@@ -374,6 +585,7 @@ export async function computeView(
     let points = 0;
     let bestSimilarity = 0;
     for (const turn of round.turns) {
+      if (turn.type === 'decomposition') continue;
       if (turn.concept) continue;
       const row = vocab.index.get(turn.word);
       if (row === undefined) {
@@ -404,6 +616,21 @@ export async function computeView(
   let roundPoints = 0;
   let bestSimilarity = 0;
   for (const turn of round.turns) {
+    if (turn.type === 'decomposition') {
+      const decomposition = decomposeTarget(vocab, answerRow, usedRows);
+      history.push({
+        type: 'decomposition',
+        turn: turn.turn,
+        terms: decomposition?.terms ?? [],
+        similarity: decomposition?.similarity ?? 0,
+        similarityPercentile: decomposition?.similarityPercentile ?? 0,
+      });
+      for (const term of decomposition?.terms ?? []) {
+        const row = vocab.index.get(term.word);
+        if (row !== undefined) usedRows.add(row);
+      }
+      continue;
+    }
     const guessRow = vocab.index.get(turn.word);
     if (guessRow === undefined) {
       return { ok: false, error: { error: 'not_a_word', actionIndex: turn.actionIndex, detail: turn.word } };

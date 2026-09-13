@@ -121,4 +121,16 @@ describe('replay', () => {
     expect(result.state.current.turns[0]).toMatchObject({ concept: 'plurality', word: 'cats' });
     expect(result.state.current.solved).toBe(false);
   });
+
+  it('uses a decomposition probe as a turn without solving the round', () => {
+    const result = replay([{ type: 'decomposition' }], ['shark'], { rounds: 1 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.current.turns[0]).toEqual({
+      type: 'decomposition',
+      turn: 1,
+      actionIndex: 0,
+    });
+    expect(result.state.current.solved).toBe(false);
+  });
 });
