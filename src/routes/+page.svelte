@@ -347,7 +347,7 @@
   <meta property="og:title" content="LatentGuess: Vector word guessing" />
   <meta
     property="og:description"
-    content="Find the hidden word using GloVe embeddings, vector hints, and concept probes."
+    content="Find the hidden word using meaning and semantics."
   />
   <meta property="og:image" content="https://nphard.app/latent/og-preview.svg" />
   <meta property="og:image:type" content="image/svg+xml" />
@@ -600,20 +600,13 @@
       <p>
         Warning: Depending on the seed, this game may be DIFFICULT. We are working on features to make it easier.
         <br><br>
-        Find five hidden words, with 10 guesses for each word.</p>
-      <ul>
-        <li>
-          The percentage shows your guess's similarity to the hidden word.
-        </li>
-        <li>
-          The equation shows one, sometimes two words that linearly combine with your guess to approximate the hidden word.
-        </li>
-        <li>
-          Concept guesses project the hidden word onto a semantic axis built from many contrasting examples. For example,
-          plurality averages directions such as <em>cats − cat</em>, <em>dogs − dog</em>, and <em>houses − house</em>.
-          The two percentages show position between the poles; they are not ordinary cosine similarities or probabilities.
-        </li>
-      </ul>
+        Your goal is to find five hidden words. You get 10 guesses for each word.</p>
+        <ul>
+        <li>Similarity: The percentage shows how close your guess (or another word) is in meaning to the hidden word. Higher is better.</li>
+        <li>Word equation: After making a guess, an equation combining your guess with one or two other words is displayed. This is a clue for which direction to explore. </li>
+        <li>Concept guesses: These show where the hidden word falls between two opposite ideas, such as singular ↔ plural. The percentages show which side the hidden word is closer to—they aren't probabilities or normal similarity scores.</li>
+        </ul>
+    <p>For example, the game learns the idea of plurality from patterns like cat → cats, dog → dogs, and house → houses.</p>
 
       <br><br><br>
       <h3>More detail</h3>
