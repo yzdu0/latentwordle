@@ -26,7 +26,7 @@
     <p>
       The vocabulary comes from <strong>GloVe Wiki-Gigaword 300</strong>. Each word has a 300-number vector learned
       from the contexts in which it appeared in a large text corpus. Words used in similar contexts tend to point in
-      similar directions; this is a statistical property, not a dictionary definition.
+      similar directions. 
     </p>
     <p>
       During preparation, vectors are L2-normalized and quantized to signed 8-bit integers. At runtime, a stored
@@ -118,14 +118,11 @@
     <p>
       Abstractness and emotionality are category-like rather than one repeated word relationship, so they use the
       direction between broad example centroids. The emotion pole includes varied examples such as <em>happy</em>,
-      <em>sad</em>, <em>angry</em>, and <em>afraid</em>. The abstract and tangible examples were selected using human
-      concreteness ratings, and the ambiguous label <em>concrete</em> is not used as an anchor:
+      <em>sad</em>, <em>angry</em>, and <em>afraid</em>.
     </p>
     <div class="formula"><code>u_C = normalize(mean(v(abstract examples)) − mean(v(tangible examples)))</code></div>
     <p>
-      The hidden word is projected onto the direction with <code>r = ⟨v(ζ), u_C⟩</code>. The result is calibrated against
-      the average locations of both anchor sets and displayed as <code>A_C(ζ)</code>. The two pole percentages add to
-      100%, and the signed axis score runs from −100% at the negative pole to +100% at the positive pole.
+      The hidden word is projected onto the direction with <code>r = ⟨v(ζ), u_C⟩</code>. 
     </p>
     <ul>
       <li><strong>abstraction:</strong> abstract ↔ tangible</li>
@@ -135,10 +132,7 @@
       <li><strong>relation:</strong> connected ↔ isolated</li>
     </ul>
     <p>
-      These are model measurements, not category facts or probabilities. GloVe has one vector per spelling, so it cannot
-      choose between senses of an overloaded word. It also learns from co-occurrence: a physical object can score less
-      tangible than expected when its name rarely appears in the same contexts as the anchor examples. Averaging many
-      contrasts makes the probe more stable, but it cannot remove those limitations.
+      
     </p>
   </section>
 
