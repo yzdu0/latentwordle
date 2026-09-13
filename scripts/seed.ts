@@ -13,6 +13,12 @@ const ROOT = path.resolve(import.meta.dirname, '..');
 
 const embeddingKey = embeddingKeyFromArgs();
 const embedding = EMBEDDINGS[embeddingKey];
+const answerAliases =
+  embeddingKey === 'word2vec'
+    ? (JSON.parse(
+        fs.readFileSync(path.join(ROOT, 'data/word2vec-answer-aliases.json'), 'utf8'),
+      ) as Record<string, string>)
+    : {};
 const legacyGlove = embeddingKey === 'glove' ? argValue('glove') : null;
 const archive = argValue('archive') ?? legacyGlove ?? path.join(ROOT, '.cache', embedding.archive);
 const outputDir = argValue('output') ?? path.join(ROOT, '.cache/dev');
@@ -23,7 +29,14 @@ const vocabulary = fs
   .split('\n')
   .map((line) => line.trim())
   .filter(Boolean);
-const answers = JSON.parse(fs.readFileSync(path.join(ROOT, 'data/answers.json'), 'utf8')) as string[];
+const currentAnswers = JSON.parse(fs.readFileSync(path.join(ROOT, 'data/answers.json'), 'utf8')) as string[];
+const difficultAnswers = JSON.parse(
+  fs.readFileSync(path.join(ROOT, 'data/answers-difficult.json'), 'utf8'),
+) as string[];
+const currentSet = new Set(currentAnswers);
+const overlaps = difficultAnswers.filter((answer) => currentSet.has(answer));
+if (overlaps.length) throw new Error(`difficult answers already in current pool: ${overlaps.join(', ')}`);
+const answers = [...currentAnswers, ...difficultAnswers];
 const vocabMeta = JSON.parse(fs.readFileSync(path.join(ROOT, 'data/vocab-meta.json'), 'utf8')) as {
   clean: number;
   proper: number;
@@ -48,11 +61,15 @@ console.error(
 );
 
 const rowOf = new Map(words.map((word, index) => [word, index]));
+const wordByArchiveWord = new Map(words.map((word) => [answerAliases[word] ?? word, word]));
 const vectors = new Array<Float32Array | undefined>(words.length);
 let remaining = words.length;
 
-for await (const { word, vector } of readEmbeddingArchive(embedding, archive, { wanted: new Set(words) })) {
-  const index = rowOf.get(word);
+for await (const { word: archiveWord, vector } of readEmbeddingArchive(embedding, archive, {
+  wanted: new Set(wordByArchiveWord.keys()),
+})) {
+  const word = wordByArchiveWord.get(archiveWord);
+  const index = word === undefined ? undefined : rowOf.get(word);
   if (index === undefined || vectors[index]) continue;
   if (!vector) continue;
   vectors[index] = l2normalize(vector);
@@ -75,7 +92,10 @@ fs.writeFileSync(
     model: embedding.model,
     dim: embedding.dim,
     words,
-    puzzles: answers.map((answer) => ({ answer })),
+    puzzles: [
+      ...currentAnswers.map((answer) => ({ answer, difficulty: 'current' as const })),
+      ...difficultAnswers.map((answer) => ({ answer, difficulty: 'difficult' as const })),
+    ],
   }),
 );
 const vectorBytes = Buffer.concat(vectors.map((vector) => Buffer.from(quantize(vector!).buffer)));
@@ -93,11 +113,14 @@ for (let start = 0, id = 1; start < words.length; start += CHUNK, id++) {
 }
 
 answers.forEach((answer, i) => {
-  lines.push(`INSERT INTO puzzles (id, answer) VALUES (${i + 1},'${answer}');`);
+  const difficulty = i < currentAnswers.length ? 'current' : 'difficult';
+  lines.push(`INSERT INTO puzzles (id, answer, difficulty) VALUES (${i + 1},'${answer}','${difficulty}');`);
 });
 lines.push(`INSERT INTO meta (name, value) VALUES ('model','${embedding.model}');`);
 lines.push(`INSERT INTO meta (name, value) VALUES ('dim','${embedding.dim}');`);
 lines.push(`INSERT INTO meta (name, value) VALUES ('vocab_size','${words.length}');`);
+lines.push(`INSERT INTO meta (name, value) VALUES ('current_answer_count','${currentAnswers.length}');`);
+lines.push(`INSERT INTO meta (name, value) VALUES ('difficult_answer_count','${difficultAnswers.length}');`);
 lines.push(`INSERT INTO meta (name, value) VALUES ('hint_mask','${Buffer.from(hints).toString('base64')}');`);
 
 const wordsJson = JSON.stringify(words);

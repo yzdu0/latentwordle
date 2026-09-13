@@ -1,5 +1,5 @@
 import { MAX_ROUNDS } from '$lib/game/rules.ts';
-import type { Store } from './store.ts';
+import type { Puzzle, Store } from './store.ts';
 
 export function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
@@ -12,21 +12,41 @@ export function mulberry32(seed: number): () => number {
   };
 }
 
+export function dailyAnswerSeed(dayIndex: number, salt: number): number {
+  return (Math.imul(dayIndex ^ salt, 2_654_435_761) + 1) >>> 0;
+}
+
+function drawDistinct(puzzles: Puzzle[], count: number, rng: () => number): Puzzle[] | null {
+  if (puzzles.length < count) return null;
+  const used = new Set<number>();
+  const answers: Puzzle[] = [];
+  while (answers.length < count) {
+    const index = Math.floor(rng() * puzzles.length);
+    if (used.has(index)) continue;
+    used.add(index);
+    answers.push(puzzles[index]);
+  }
+  return answers;
+}
+
+export function selectAnswers(
+  puzzles: Puzzle[],
+  seed: number,
+  rounds = MAX_ROUNDS,
+): string[] | null {
+  const current = puzzles.filter(({ difficulty }) => difficulty !== 'difficult');
+  return drawDistinct(current, rounds, mulberry32(seed))?.map(({ answer }) => answer) ?? null;
+}
+
+export function selectHardAnswers(puzzles: Puzzle[], seed: number, rounds = MAX_ROUNDS): string[] | null {
+  const difficult = puzzles.filter(({ difficulty }) => difficulty === 'difficult');
+  return drawDistinct(difficult, rounds, mulberry32(seed))?.map(({ answer }) => answer) ?? null;
+}
+
 export async function randomAnswers(
   store: Store,
   seed: number,
   rounds = MAX_ROUNDS,
 ): Promise<string[] | null> {
-  const puzzles = await store.getPuzzles();
-  if (puzzles.length < rounds) return null;
-  const rng = mulberry32(seed);
-  const used = new Set<number>();
-  const answers: string[] = [];
-  while (answers.length < rounds) {
-    const index = Math.floor(rng() * puzzles.length);
-    if (used.has(index)) continue;
-    used.add(index);
-    answers.push(puzzles[index].answer);
-  }
-  return answers;
+  return selectAnswers(await store.getPuzzles(), seed, rounds);
 }

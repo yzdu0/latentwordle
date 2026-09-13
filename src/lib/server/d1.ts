@@ -28,8 +28,8 @@ export class D1Store implements Store {
     let promise = D1Store.puzzleCache.get(this.db);
     if (!promise) {
       promise = this.db
-        .prepare('SELECT answer FROM puzzles ORDER BY id')
-        .all<{ answer: string }>()
+        .prepare('SELECT answer, difficulty FROM puzzles ORDER BY id')
+        .all<{ answer: string; difficulty: string }>()
         .then((result) => (result.results ?? []).map(parsePuzzle));
       D1Store.puzzleCache.set(this.db, promise);
     }

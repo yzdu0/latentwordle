@@ -124,6 +124,9 @@ const vocab = fs
   .filter(Boolean);
 const inVocab = new Set(vocab);
 const curated = JSON.parse(fs.readFileSync(path.join(ROOT, 'data/answers-curated.json'), 'utf8')) as string[];
+const difficult = new Set(
+  JSON.parse(fs.readFileSync(path.join(ROOT, 'data/answers-difficult.json'), 'utf8')) as string[],
+);
 const blocklist = new Set(
   fs
     .readFileSync(path.join(ROOT, 'data/blocklist.txt'), 'utf8')
@@ -156,7 +159,10 @@ for (const word of vocab) {
 }
 
 const curatedSet = new Set(curated);
-const answers = [...curated, ...selected.filter((word) => !curatedSet.has(word))].slice(0, MAX_ANSWERS);
+const answers = [
+  ...curated,
+  ...selected.filter((word) => !curatedSet.has(word) && !difficult.has(word)),
+].slice(0, MAX_ANSWERS);
 fs.writeFileSync(path.join(ROOT, 'data/answers.json'), JSON.stringify(answers, null, 2) + '\n');
 console.error(`answers: ${answers.length} (curated ${curated.length}, generated ${answers.length - curated.length})`);
 

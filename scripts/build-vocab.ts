@@ -125,8 +125,18 @@ fs.readFileSync(frequencyFile, 'utf8')
     frequency.set(line.slice(0, space), index + 1);
   });
 
-const answers = new Set(
-  JSON.parse(fs.readFileSync(path.join(ROOT, 'data/answers.json'), 'utf8')) as string[],
+const answers = new Set([
+  ...(JSON.parse(fs.readFileSync(path.join(ROOT, 'data/answers.json'), 'utf8')) as string[]),
+  ...(JSON.parse(fs.readFileSync(path.join(ROOT, 'data/answers-difficult.json'), 'utf8')) as string[]),
+]);
+const answerAliases =
+  embeddingKey === 'word2vec'
+    ? (JSON.parse(
+        fs.readFileSync(path.join(ROOT, 'data/word2vec-answer-aliases.json'), 'utf8'),
+      ) as Record<string, string>)
+    : {};
+const answerByArchiveWord = new Map(
+  [...answers].map((answer) => [answerAliases[answer] ?? answer, answer]),
 );
 const blocklist = new Set(
   fs
@@ -142,7 +152,8 @@ const seen = new Set<string>();
 const dropped: Record<string, string[]> = { rare: [], unknown: [], filtered: [] };
 const missingAnswers = new Set(answers);
 
-for await (const { word } of readEmbeddingArchive(embedding, embeddingArchive, { wanted: new Set() })) {
+for await (const { word: archiveWord } of readEmbeddingArchive(embedding, embeddingArchive, { wanted: new Set() })) {
+  const word = answerByArchiveWord.get(archiveWord) ?? archiveWord;
   if (seen.has(word) || !WORD_RE.test(word)) continue;
   const isAnswer = answers.has(word);
   if (!isAnswer) {

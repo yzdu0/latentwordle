@@ -1,5 +1,6 @@
 export interface Puzzle {
   answer: string;
+  difficulty?: 'current' | 'difficult';
 }
 
 export interface Vocab {
@@ -18,8 +19,11 @@ export interface Store {
   getMeta(name: string): Promise<string | null>;
 }
 
-export function parsePuzzle(row: { answer: string }): Puzzle {
-  return { answer: row.answer };
+export function parsePuzzle(row: { answer: string; difficulty?: string }): Puzzle {
+  return {
+    answer: row.answer,
+    difficulty: row.difficulty === 'difficult' ? 'difficult' : 'current',
+  };
 }
 
 export function decodeBytes(base64: string): Uint8Array {

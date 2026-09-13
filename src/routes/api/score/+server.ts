@@ -10,6 +10,9 @@ function parseGame(input: unknown): GameRef | null {
   if (game.kind === 'daily' && typeof game.date === 'string') {
     return { kind: 'daily', date: game.date };
   }
+  if (game.kind === 'hard' && typeof game.date === 'string') {
+    return { kind: 'hard', date: game.date };
+  }
   if (game.kind === 'random' && Number.isInteger(game.seed)) {
     return { kind: 'random', seed: game.seed as number };
   }

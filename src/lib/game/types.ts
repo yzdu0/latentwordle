@@ -1,6 +1,9 @@
 import type { ConceptKey } from './concepts.ts';
 
-export type GameRef = { kind: 'daily'; date: string } | { kind: 'random'; seed: number };
+export type GameRef =
+  | { kind: 'daily'; date: string }
+  | { kind: 'hard'; date: string }
+  | { kind: 'random'; seed: number };
 
 export type Action =
   | { type: 'guess'; word: string }

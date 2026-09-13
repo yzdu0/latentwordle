@@ -3,28 +3,30 @@ import { computeView } from './engine.ts';
 import type { EngineResult } from './engine.ts';
 import { dayIndexOf, isPlayableDailyDate } from './dates.ts';
 import { getStore } from './platform.ts';
-import { mulberry32, randomAnswers } from './random.ts';
+import { dailyAnswerSeed, randomAnswers, selectAnswers, selectHardAnswers } from './random.ts';
 import { dailySalt, gameRounds } from './settings.ts';
 import type { Store } from './store.ts';
 
-async function dailyAnswers(
+export async function dailyAnswers(
   store: Store,
   dayIndex: number,
   rounds: number,
   salt: number,
 ): Promise<string[] | null> {
   const puzzles = await store.getPuzzles();
-  if (puzzles.length < rounds) return null;
-  const rng = mulberry32((Math.imul(dayIndex ^ salt, 2_654_435_761) + 1) >>> 0);
-  const used = new Set<number>();
-  const answers: string[] = [];
-  while (answers.length < rounds) {
-    const index = Math.floor(rng() * puzzles.length);
-    if (used.has(index)) continue;
-    used.add(index);
-    answers.push(puzzles[index].answer);
-  }
-  return answers;
+  const seed = dailyAnswerSeed(dayIndex, salt);
+  return selectAnswers(puzzles, seed, rounds);
+}
+
+export async function hardAnswers(
+  store: Store,
+  dayIndex: number,
+  rounds: number,
+  salt: number,
+): Promise<string[] | null> {
+  const puzzles = await store.getPuzzles();
+  const seed = dailyAnswerSeed(dayIndex, salt ^ 0x4d5958);
+  return selectHardAnswers(puzzles, seed, rounds);
 }
 
 export async function scoreRequest(
@@ -36,12 +38,15 @@ export async function scoreRequest(
   const rounds = gameRounds();
   let answers: string[] | null;
 
-  if (game.kind === 'daily') {
+  if (game.kind === 'daily' || game.kind === 'hard') {
     const dayIndex = dayIndexOf(game.date);
     if (dayIndex === null || !isPlayableDailyDate(game.date)) {
       return { ok: false, error: { error: 'bad_request', detail: 'date is outside the playable range' } };
     }
-    answers = await dailyAnswers(store, dayIndex, rounds, dailySalt());
+    answers =
+      game.kind === 'hard'
+        ? await hardAnswers(store, dayIndex, rounds, dailySalt())
+        : await dailyAnswers(store, dayIndex, rounds, dailySalt());
   } else {
     answers = await randomAnswers(store, game.seed, rounds);
   }
@@ -61,7 +66,7 @@ export async function recordCompletedScore(
 ): Promise<void> {
   if (!env?.DB || !view.finished) return;
 
-  const gameKey = game.kind === 'daily' ? game.date : String(game.seed);
+  const gameKey = game.kind === 'random' ? String(game.seed) : game.date;
   const solvedRounds = view.results.filter((result) => result.solved).length;
   const totalTurns = view.results.reduce((sum, result) => sum + result.turnsUsed, 0);
 
