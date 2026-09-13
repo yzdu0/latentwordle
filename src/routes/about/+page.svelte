@@ -24,9 +24,9 @@
   <section>
     <h2>1. The word vectors</h2>
     <p>
-      The vocabulary comes from <strong>GloVe Wiki-Gigaword 300</strong>. Each word has a 300-number vector learned
-      from the contexts in which it appeared in a large text corpus. Words used in similar contexts tend to point in
-      similar directions. 
+      The vocabulary comes from <strong>Word2Vec Google News 300</strong>. Each word has a 300-number vector learned
+      from the contexts in which it appeared in the Google News corpus. Words used in similar contexts tend to point
+      in similar directions.
     </p>
     <p>
       During preparation, vectors are L2-normalized and quantized to signed 8-bit integers. At runtime, a stored

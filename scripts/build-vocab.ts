@@ -1,13 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { createGunzip } from 'node:zlib';
-import { createReadStream, createWriteStream } from 'node:fs';
+import { createWriteStream } from 'node:fs';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { spawnSync } from 'node:child_process';
-import readline from 'node:readline';
-import { EMBEDDING } from '../src/lib/game/config.ts';
+import { EMBEDDINGS } from '../src/lib/game/config.ts';
 import { STOPWORDS } from '../spike/lib/vocab.ts';
+import {
+  argValue,
+  downloadIfMissing,
+  embeddingKeyFromArgs,
+  readEmbeddingArchive,
+} from './lib/pretrained-embeddings.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const CACHE = path.join(ROOT, '.cache');
@@ -18,11 +22,6 @@ const FREQUENCY_URL =
   'https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/en/en_50k.txt';
 const WORDNET_URL = 'https://wordnetcode.princeton.edu/3.0/WNdb-3.0.tar.gz';
 
-function argValue(flag: string): string | null {
-  const hit = process.argv.find((a) => a.startsWith(`--${flag}=`));
-  return hit ? hit.slice(flag.length + 3) : null;
-}
-
 async function download(url: string, destination: string): Promise<void> {
   if (fs.existsSync(destination)) return;
   console.error(`downloading ${url}`);
@@ -31,8 +30,11 @@ async function download(url: string, destination: string): Promise<void> {
   await pipeline(Readable.fromWeb(res.body as never), createWriteStream(destination));
 }
 
-const gloveArchive = argValue('glove') ?? path.join(CACHE, 'glove-wiki-gigaword-300.gz');
-await download(EMBEDDING.url, gloveArchive);
+const embeddingKey = embeddingKeyFromArgs();
+const embedding = EMBEDDINGS[embeddingKey];
+const legacyGlove = embeddingKey === 'glove' ? argValue('glove') : null;
+const embeddingArchive = argValue('archive') ?? legacyGlove ?? path.join(CACHE, embedding.archive);
+await downloadIfMissing(embedding, embeddingArchive);
 
 const frequencyFile = path.join(CACHE, 'en_50k.txt');
 await download(FREQUENCY_URL, frequencyFile);
@@ -140,19 +142,7 @@ const seen = new Set<string>();
 const dropped: Record<string, string[]> = { rare: [], unknown: [], filtered: [] };
 const missingAnswers = new Set(answers);
 
-const rl = readline.createInterface({
-  input: createReadStream(gloveArchive).pipe(createGunzip()),
-  crlfDelay: Infinity,
-});
-let header = true;
-for await (const line of rl) {
-  if (header) {
-    header = false;
-    continue;
-  }
-  const space = line.indexOf(' ');
-  if (space <= 0) continue;
-  const word = line.slice(0, space);
+for await (const { word } of readEmbeddingArchive(embedding, embeddingArchive, { wanted: new Set() })) {
   if (seen.has(word) || !WORD_RE.test(word)) continue;
   const isAnswer = answers.has(word);
   if (!isAnswer) {
@@ -183,7 +173,7 @@ for await (const line of rl) {
 }
 
 if (missingAnswers.size > 0) {
-  throw new Error(`answers missing from ${EMBEDDING.model}: ${[...missingAnswers].join(', ')}`);
+  throw new Error(`answers missing from ${embedding.model}: ${[...missingAnswers].join(', ')}`);
 } 
 
 const kept = [...clean, ...proper];
@@ -192,7 +182,7 @@ fs.writeFileSync(outPath, kept.join('\n') + '\n');
 fs.writeFileSync(
   path.join(ROOT, 'data/vocab-meta.json'),
   JSON.stringify(
-    { model: EMBEDDING.model, clean: clean.length, proper: proper.length, hintLimit: HINT_LIMIT },
+    { model: embedding.model, clean: clean.length, proper: proper.length, hintLimit: HINT_LIMIT },
     null,
     2,
   ) + '\n',

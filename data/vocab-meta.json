@@ -1,6 +1,6 @@
 {
-  "model": "glove-wiki-gigaword-300",
-  "clean": 32009,
-  "proper": 2134,
+  "model": "word2vec-google-news-300",
+  "clean": 31341,
+  "proper": 1007,
   "hintLimit": 15000
 }

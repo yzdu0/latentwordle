@@ -1,30 +1,22 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { createGunzip } from 'node:zlib';
-import { createReadStream, createWriteStream } from 'node:fs';
-import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
-import readline from 'node:readline';
-import { EMBEDDING } from '../src/lib/game/config.ts';
+import { EMBEDDINGS } from '../src/lib/game/config.ts';
 import { l2normalize, quantize } from '../src/lib/game/scoring.ts';
+import {
+  argValue,
+  downloadIfMissing,
+  embeddingKeyFromArgs,
+  readEmbeddingArchive,
+} from './lib/pretrained-embeddings.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
-function argValue(flag: string): string | null {
-  const hit = process.argv.find((a) => a.startsWith(`--${flag}=`));
-  return hit ? hit.slice(flag.length + 3) : null;
-}
-
-async function ensureGlove(archive: string): Promise<void> {
-  if (fs.existsSync(archive)) return;
-  console.error(`downloading ${EMBEDDING.model} (~380 MB) to ${archive}`);
-  const res = await fetch(EMBEDDING.url);
-  if (!res.ok || !res.body) throw new Error(`download failed: ${res.status}`);
-  await pipeline(Readable.fromWeb(res.body as never), createWriteStream(archive));
-}
-
-const archive = argValue('glove') ?? path.join(ROOT, '.cache/glove-wiki-gigaword-300.gz');
-await ensureGlove(archive);
+const embeddingKey = embeddingKeyFromArgs();
+const embedding = EMBEDDINGS[embeddingKey];
+const legacyGlove = embeddingKey === 'glove' ? argValue('glove') : null;
+const archive = argValue('archive') ?? legacyGlove ?? path.join(ROOT, '.cache', embedding.archive);
+const outputDir = argValue('output') ?? path.join(ROOT, '.cache/dev');
+await downloadIfMissing(embedding, archive);
 
 const vocabulary = fs
   .readFileSync(path.join(ROOT, 'data/vocab.txt'), 'utf8')
@@ -59,24 +51,10 @@ const rowOf = new Map(words.map((word, index) => [word, index]));
 const vectors = new Array<Float32Array | undefined>(words.length);
 let remaining = words.length;
 
-const rl = readline.createInterface({
-  input: createReadStream(archive).pipe(createGunzip()),
-  crlfDelay: Infinity,
-});
-let header = true;
-for await (const line of rl) {
-  if (header) {
-    header = false;
-    continue;
-  }
-  const space = line.indexOf(' ');
-  if (space <= 0) continue;
-  const word = line.slice(0, space);
+for await (const { word, vector } of readEmbeddingArchive(embedding, archive, { wanted: new Set(words) })) {
   const index = rowOf.get(word);
   if (index === undefined || vectors[index]) continue;
-  const parts = line.slice(space + 1).split(' ');
-  const vector = new Float32Array(parts.length);
-  for (let j = 0; j < parts.length; j++) vector[j] = Number(parts[j]);
+  if (!vector) continue;
   vectors[index] = l2normalize(vector);
   remaining -= 1;
   if (remaining === 0) break;
@@ -84,27 +62,26 @@ for await (const line of rl) {
 
 const missing = words.filter((_, index) => !vectors[index]);
 if (missing.length > 0) {
-  throw new Error(`missing ${EMBEDDING.model} vectors for: ${missing.join(', ')}`);
+  throw new Error(`missing ${embedding.model} vectors for: ${missing.join(', ')}`);
 }
-if (vectors.some((vector) => vector!.length !== EMBEDDING.dim)) {
-  throw new Error(`unexpected vector dimension (expected ${EMBEDDING.dim})`);
+if (vectors.some((vector) => vector!.length !== embedding.dim)) {
+  throw new Error(`unexpected vector dimension (expected ${embedding.dim})`);
 }
 
-const devDir = path.join(ROOT, '.cache/dev');
-fs.mkdirSync(devDir, { recursive: true });
+fs.mkdirSync(outputDir, { recursive: true });
 fs.writeFileSync(
-  path.join(devDir, 'index.json'),
+  path.join(outputDir, 'index.json'),
   JSON.stringify({
-    model: EMBEDDING.model,
-    dim: EMBEDDING.dim,
+    model: embedding.model,
+    dim: embedding.dim,
     words,
     puzzles: answers.map((answer) => ({ answer })),
   }),
 );
 const vectorBytes = Buffer.concat(vectors.map((vector) => Buffer.from(quantize(vector!).buffer)));
-fs.writeFileSync(path.join(devDir, 'vectors.bin'), vectorBytes);
-fs.writeFileSync(path.join(devDir, 'hints.bin'), Buffer.from(hints));
-console.error(`wrote dev bundle (${(vectorBytes.length / 1024 / 1024).toFixed(1)} MB)`);
+fs.writeFileSync(path.join(outputDir, 'vectors.bin'), vectorBytes);
+fs.writeFileSync(path.join(outputDir, 'hints.bin'), Buffer.from(hints));
+console.error(`wrote ${outputDir} (${(vectorBytes.length / 1024 / 1024).toFixed(1)} MB)`);
 
 const lines: string[] = ['DELETE FROM vocab;', 'DELETE FROM puzzles;', 'DELETE FROM meta;'];
 
@@ -118,8 +95,8 @@ for (let start = 0, id = 1; start < words.length; start += CHUNK, id++) {
 answers.forEach((answer, i) => {
   lines.push(`INSERT INTO puzzles (id, answer) VALUES (${i + 1},'${answer}');`);
 });
-lines.push(`INSERT INTO meta (name, value) VALUES ('model','${EMBEDDING.model}');`);
-lines.push(`INSERT INTO meta (name, value) VALUES ('dim','${EMBEDDING.dim}');`);
+lines.push(`INSERT INTO meta (name, value) VALUES ('model','${embedding.model}');`);
+lines.push(`INSERT INTO meta (name, value) VALUES ('dim','${embedding.dim}');`);
 lines.push(`INSERT INTO meta (name, value) VALUES ('vocab_size','${words.length}');`);
 lines.push(`INSERT INTO meta (name, value) VALUES ('hint_mask','${Buffer.from(hints).toString('base64')}');`);
 
@@ -130,6 +107,6 @@ for (let offset = 0, part = 0; offset < wordsJson.length; offset += META_CHUNK, 
   lines.push(`INSERT INTO meta (name, value) VALUES ('vocab_words_${String(part).padStart(3, '0')}','${chunk}');`);
 }
 
-const seedPath = path.join(ROOT, '.cache/seed.sql');
+const seedPath = argValue('sql') ?? path.join(ROOT, '.cache/seed.sql');
 fs.writeFileSync(seedPath, lines.join('\n') + '\n');
 console.error(`wrote ${seedPath} (${(fs.statSync(seedPath).size / 1024 / 1024).toFixed(1)} MB)`);

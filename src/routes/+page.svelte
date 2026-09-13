@@ -624,7 +624,7 @@
       </p>
       <h3>How it works</h3>
       <p>
-        Words are 300-dimension vectors from <strong>GloVe</strong>. Similar vectors represent words used in
+        Words are 300-dimension vectors from <strong>Word2Vec</strong>. Similar vectors represent words used in
         similar contexts.
       </p>
       <p>
