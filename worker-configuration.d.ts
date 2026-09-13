@@ -4,7 +4,7 @@
 interface __BaseEnv_Env {
 	DB: D1Database;
 	ASSETS: Fetcher;
-	DAILY_SEED: "314159265";
+	DAILY_SEED: "624413479";
 	LOCAL_SEED: "106777546";
 }
 declare namespace Cloudflare {
