@@ -80,6 +80,8 @@
     let nextGameIn = $state("");
     let histogram = $state<ScoreHistogram | null>(null);
     let histogramLoading = $state(false);
+    let gameSwitching = $state(false);
+    let histogramRequestId = 0;
 
     const roundDone = $derived(view ? view.roundEnded : false);
     const dayDone = $derived(view ? view.finished : false);
@@ -214,6 +216,34 @@
         );
     }
 
+    const SHORT_MONTHS = [
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+    ];
+    const SHORT_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+    function archiveDayLabel(date: string, index: number): string {
+        if (index === 0) return "Today";
+        if (index === 1) return "Yesterday";
+        const parsed = new Date(`${date}T00:00:00Z`);
+        return SHORT_DAYS[parsed.getUTCDay()];
+    }
+
+    function archiveDateLabel(date: string): string {
+        const parsed = new Date(`${date}T00:00:00Z`);
+        return `${SHORT_MONTHS[parsed.getUTCMonth()]} ${parsed.getUTCDate()}`;
+    }
+
     function updateCountdown(): void {
         const now = new Date();
         const next = Date.UTC(
@@ -275,6 +305,7 @@
     }
 
     async function loadHistogram(game: GameRef): Promise<void> {
+        const requestId = ++histogramRequestId;
         histogram = null;
         if (game.kind !== "daily") return;
         histogramLoading = true;
@@ -291,12 +322,14 @@
                 data.bins.every((count) => typeof count === "number") &&
                 typeof data.total === "number"
             ) {
-                histogram = data as ScoreHistogram;
+                if (requestId === histogramRequestId) {
+                    histogram = data as ScoreHistogram;
+                }
             }
         } catch {
-            histogram = null;
+            if (requestId === histogramRequestId) histogram = null;
         } finally {
-            histogramLoading = false;
+            if (requestId === histogramRequestId) histogramLoading = false;
         }
     }
 
@@ -335,7 +368,7 @@
                 }),
             );
             recordStats();
-            if (view.finished) await loadHistogram(view.game);
+            if (view.finished) void loadHistogram(view.game);
             return true;
         } catch {
             lastErrorCode = "network";
@@ -346,101 +379,38 @@
         }
     }
 
-    async function init(date?: string) {
-        archiveOpen = false;
-        busy = true;
-        error = "";
-        histogram = null;
-        actions = [];
-        submissionId = "";
-        guessInput = "";
-        conceptGuess = "";
-        try {
-            const query = date ? `?date=${encodeURIComponent(date)}` : "";
-            const res = await fetch(`${base}/api/puzzle/today${query}`);
-            if (!res.ok) {
-                error = "Could not load that daily game.";
-                return;
-            }
-            const today = (await res.json()) as GameStart;
-            start = today;
-            if (today.game.kind === "daily") {
-                selectedDate = today.game.date;
-                if (playableDates.length === 0)
-                    playableDates = datesThrough(today.game.date);
-            }
-
-            const currentStorageKey = gameStorageKey(today.game);
-            const saved =
-                localStorage.getItem(currentStorageKey) ??
-                localStorage.getItem(LEGACY_STORAGE_KEY);
-            if (saved) {
-                let parsed: {
-                    game?: GameRef;
-                    actions?: Action[];
-                    submissionId?: unknown;
-                } | null = null;
-                try {
-                    parsed = JSON.parse(saved) as {
-                        game?: GameRef;
-                        actions?: Action[];
-                        submissionId?: unknown;
-                    };
-                } catch {
-                    parsed = null;
-                }
-                const savedGame = parsed?.game;
-                const savedActions = parsed?.actions;
-                const savedSubmissionId = parsed?.submissionId;
-                if (
-                    sameGame(savedGame, today.game) &&
-                    Array.isArray(savedActions)
-                ) {
-                    actions = savedActions;
-                    if (
-                        typeof savedSubmissionId === "string" &&
-                        SUBMISSION_ID_RE.test(savedSubmissionId)
-                    ) {
-                        submissionId = savedSubmissionId;
-                    }
-                }
-            }
-            if (!submissionId) submissionId = createSubmissionId();
-            const restored = actions.length > 0;
-            const ok = await post(actions);
-            if (!ok && restored && RESET_CODES.has(lastErrorCode)) {
-                actions = [];
-                localStorage.removeItem(currentStorageKey);
-                await post([]);
-            }
-        } finally {
-            busy = false;
-        }
-    }
-
-    async function initHard() {
-        if (busy) return;
-        archiveOpen = false;
-        busy = true;
-        error = "";
-        histogram = null;
-        actions = [];
-        submissionId = "";
-        guessInput = "";
-        conceptGuess = "";
-        const hardDate = selectedDate || playableDates[0];
-        if (!hardDate) {
-            busy = false;
-            return;
-        }
-        const hardStart: GameStart = {
-            game: { kind: "hard", date: hardDate },
-            maxTurns: start?.maxTurns ?? 10,
-            rounds: start?.rounds ?? 5,
+    async function loadGame(
+        nextStart: GameStart,
+        allowLegacySave = false,
+    ): Promise<boolean> {
+        const previous = {
+            start,
+            view,
+            actions,
+            submissionId,
+            selectedDate,
+            histogram,
         };
-        start = hardStart;
-        const storageKey = gameStorageKey(hardStart.game);
-        const saved = localStorage.getItem(storageKey);
+        busy = true;
+        error = "";
+        histogramRequestId += 1;
+        histogramLoading = false;
+        histogram = null;
+        actions = [];
+        submissionId = "";
+        guessInput = "";
+        conceptGuess = "";
+        start = nextStart;
+        if (nextStart.game.kind !== "random") {
+            selectedDate = nextStart.game.date;
+        }
+
+        const storageKey = gameStorageKey(nextStart.game);
+        const saved =
+            localStorage.getItem(storageKey) ??
+            (allowLegacySave
+                ? localStorage.getItem(LEGACY_STORAGE_KEY)
+                : null);
         if (saved) {
             try {
                 const parsed = JSON.parse(saved) as {
@@ -449,7 +419,7 @@
                     submissionId?: unknown;
                 };
                 if (
-                    sameGame(parsed.game, hardStart.game) &&
+                    sameGame(parsed.game, nextStart.game) &&
                     Array.isArray(parsed.actions)
                 ) {
                     actions = parsed.actions;
@@ -464,15 +434,73 @@
                 localStorage.removeItem(storageKey);
             }
         }
+
         if (!submissionId) submissionId = createSubmissionId();
         const restored = actions.length > 0;
-        const ok = await post(actions);
+        let ok = await post(actions);
         if (!ok && restored && RESET_CODES.has(lastErrorCode)) {
             actions = [];
             localStorage.removeItem(storageKey);
-            await post([]);
+            ok = await post([]);
+        }
+        if (!ok && previous.view) {
+            const loadError = error;
+            start = previous.start;
+            view = previous.view;
+            actions = previous.actions;
+            submissionId = previous.submissionId;
+            selectedDate = previous.selectedDate;
+            histogram = previous.histogram;
+            error = loadError;
         }
         busy = false;
+        return ok;
+    }
+
+    async function init(date?: string): Promise<void> {
+        archiveOpen = false;
+        busy = true;
+        error = "";
+        try {
+            const query = date ? `?date=${encodeURIComponent(date)}` : "";
+            const res = await fetch(`${base}/api/puzzle/today${query}`);
+            if (!res.ok) {
+                error = "Could not load that daily game.";
+                return;
+            }
+            const today = (await res.json()) as GameStart;
+            if (today.game.kind === "daily" && playableDates.length === 0) {
+                playableDates = datesThrough(today.game.date);
+            }
+            await loadGame(today, true);
+        } catch {
+            error = "Could not load that daily game.";
+        } finally {
+            busy = false;
+        }
+    }
+
+    async function selectArchiveGame(
+        kind: "daily" | "hard",
+        date = selectedDate || playableDates[0],
+    ): Promise<void> {
+        archiveOpen = false;
+        if (!date || busy) return;
+        const game: GameRef =
+            kind === "hard"
+                ? { kind: "hard", date }
+                : { kind: "daily", date };
+        if (sameGame(start?.game, game)) return;
+        gameSwitching = true;
+        try {
+            await loadGame({
+                game,
+                maxTurns: start?.maxTurns ?? 10,
+                rounds: start?.rounds ?? 5,
+            });
+        } finally {
+            gameSwitching = false;
+        }
     }
 
     async function submitGuess(event: SubmitEvent) {
@@ -511,12 +539,6 @@
                 (entry) => entry.type === "guess" && entry.word === word,
             ) ?? false
         );
-    }
-
-    async function selectDate(date: string): Promise<void> {
-        archiveOpen = false;
-        if (busy || date === selectedDate) return;
-        await init(date);
     }
 
     async function giveUp() {
@@ -635,33 +657,63 @@
 
     <div class="daily-controls">
         <details class="archive-menu" bind:open={archiveOpen}>
-            <summary>Archive</summary>
+            <summary>
+                <span>Archive</span>
+                {#if gameSwitching}
+                    <span
+                        class="loading-spinner compact"
+                        role="status"
+                        aria-label="Loading game"
+                    ></span>
+                {/if}
+            </summary>
             <div class="archive-panel">
                 {#if playableDates.length}
-                    <label class="archive-picker">
-                        <span>Daily game</span>
-                        <input
-                            type="date"
-                            aria-label="Choose a daily game"
-                            value={selectedDate}
-                            min={playableDates.at(-1)}
-                            max={playableDates[0]}
+                    <span class="archive-heading">Mode</span>
+                    <div
+                        class="archive-mode-options"
+                        role="group"
+                        aria-label="Game mode"
+                    >
+                        <button
+                            class:active={!hardMode}
+                            aria-pressed={!hardMode}
                             disabled={busy}
-                            onchange={(event) =>
-                                void selectDate(event.currentTarget.value)}
-                        />
-                    </label>
+                            onclick={() =>
+                                void selectArchiveGame("daily")}
+                        >Daily</button>
+                        <button
+                            class:active={hardMode}
+                            aria-pressed={hardMode}
+                            disabled={busy}
+                            onclick={() => void selectArchiveGame("hard")}
+                        >Hard</button>
+                    </div>
+                    <span class="archive-heading">Recent games</span>
+                    <div class="archive-options">
+                        {#each playableDates as date, index (date)}
+                            <button
+                                class="archive-option"
+                                class:active={date === selectedDate}
+                                aria-current={date === selectedDate
+                                    ? "page"
+                                    : undefined}
+                                aria-label={`${hardMode ? "Hard" : "Daily"} mode, ${archiveDayLabel(date, index)}, ${archiveDateLabel(date)}`}
+                                disabled={busy}
+                                onclick={() =>
+                                    void selectArchiveGame(
+                                        hardMode ? "hard" : "daily",
+                                        date,
+                                    )}
+                            >
+                                <span>{archiveDayLabel(date, index)}</span>
+                                <time datetime={date}
+                                    >{archiveDateLabel(date)}</time
+                                >
+                            </button>
+                        {/each}
+                    </div>
                 {/if}
-                <button
-                    class="archive-mode"
-                    onclick={() =>
-                        hardMode
-                            ? void init(selectedDate || undefined)
-                            : void initHard()}
-                    disabled={busy}
-                >
-                    {hardMode ? "Main game" : "Hard mode"}
-                </button>
             </div>
         </details>
         <p class="countdown">
@@ -669,9 +721,21 @@
         </p>
     </div>
 
-    {#if !view}
-        <p class="muted loading">{error || "Loading…"}</p>
-    {:else}
+    <div
+        class="game-area"
+        class:switching={gameSwitching}
+        aria-busy={gameSwitching}
+    >
+      {#if !view}
+        {#if error}
+            <p class="error loading">{error}</p>
+        {:else}
+            <p class="muted loading" role="status">
+                <span class="loading-spinner"></span>
+                Loading game…
+            </p>
+        {/if}
+      {:else}
         <div class="status">
             <span class="meta">
                 Round {view.round + 1}/{view.rounds}
@@ -688,8 +752,8 @@
         </div>
         {#if hardMode}
             <p class="hard-description">
-                This is the same as the main game, except the hidden words may
-                be more niche. Engine output is a result of machine learning, and may have bias or inaccuracies.
+                <strong>Hard mode.</strong> Niche words with historical,
+                cultural, or linguistic associations.
             </p>
         {/if}
 
@@ -1083,7 +1147,8 @@
                 <button class="help" onclick={giveUp}>give up</button>
             </div>
         {/if}
-    {/if}
+      {/if}
+    </div>
 
     <p class="bias-note">Engine results may reflect biases in the training data.</p>
     <footer class="site-links" aria-label="More from us">
@@ -1412,15 +1477,21 @@
     }
 
     .archive-menu summary::after {
-        content: "⌄";
+        content: "";
+        display: block;
+        width: 7px;
+        height: 7px;
+        box-sizing: border-box;
+        border-right: 2px solid currentColor;
+        border-bottom: 2px solid currentColor;
         color: var(--muted);
-        font-size: 16px;
-        line-height: 1;
-        transform: translateY(-1px);
+        transform: rotate(45deg);
+        transform-origin: center;
+        transition: transform 140ms ease;
     }
 
     .archive-menu[open] summary::after {
-        content: "⌃";
+        transform: rotate(225deg);
     }
 
     .archive-menu summary:hover {
@@ -1432,61 +1503,99 @@
         top: calc(100% + 8px);
         left: 0;
         display: grid;
-        gap: 10px;
-        min-width: 250px;
-        padding: 12px;
+        gap: 7px;
+        min-width: 220px;
+        padding: 10px;
         border: 1px solid color-mix(in srgb, var(--muted) 20%, transparent);
         border-radius: 12px;
         background: var(--surface);
         box-shadow: var(--shadow-md);
     }
 
-    .archive-picker {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        padding: 7px 9px 7px 11px;
-        border-radius: 10px;
-        background: var(--track);
+    .archive-heading {
+        padding: 3px 8px 2px;
         color: var(--muted);
-        font-size: 14px;
-        font-weight: 700;
-        box-shadow: var(--shadow-sm);
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
     }
 
-    .archive-picker input {
-        max-width: 190px;
+    .archive-options {
+        display: grid;
+        gap: 2px;
+    }
+
+    .archive-mode-options {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 4px;
+        margin: 0 4px 5px;
+        padding: 3px;
+        border-radius: 9px;
+        background: var(--track);
+    }
+
+    .archive-mode-options button {
+        padding: 7px 10px;
         border: 0;
-        outline: none;
+        border-radius: 7px;
         background: transparent;
-        color: var(--text);
-        font-weight: 700;
+        color: var(--muted);
+        font: inherit;
+        font-size: 13px;
+        font-weight: 750;
         cursor: pointer;
     }
 
-    .archive-picker:focus-within {
-        background: color-mix(in srgb, var(--brand) 28%, var(--surface));
+    .archive-mode-options button:hover:not(:disabled) {
+        color: var(--text);
     }
 
-    .archive-mode {
+    .archive-mode-options button.active {
+        background: var(--surface);
+        color: var(--text);
+        box-shadow: var(--shadow-sm);
+    }
+
+    .archive-mode-options button:disabled {
+        cursor: default;
+    }
+
+    .archive-option {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 16px;
         width: 100%;
-        padding: 9px 11px;
+        padding: 9px 10px;
         border: 0;
-        border-radius: 9px;
-        background: var(--button-bg);
-        color: var(--button-text);
+        border-radius: 8px;
+        background: transparent;
+        color: var(--text);
         font-size: 14px;
         font-weight: 700;
         text-align: left;
         cursor: pointer;
     }
 
-    .archive-mode:hover:not(:disabled) {
-        background: var(--button-hover);
+    .archive-option time {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 650;
     }
 
-    .archive-mode:disabled {
-        opacity: 0.55;
+    .archive-option:hover:not(:disabled) {
+        background: var(--track);
+    }
+
+    .archive-option.active {
+        background: color-mix(in srgb, var(--brand) 13%, var(--surface));
+        box-shadow: inset 3px 0 var(--brand);
+    }
+
+    .archive-option:disabled {
+        opacity: 0.6;
         cursor: default;
     }
 
@@ -1509,10 +1618,23 @@
         margin-bottom: 20px;
     }
 
+    .game-area {
+        transition: opacity 140ms ease;
+    }
+
+    .game-area.switching {
+        opacity: 0.5;
+        pointer-events: none;
+    }
+
     .hard-description {
         margin: -8px 0 18px;
         color: var(--muted);
         font-size: 14px;
+    }
+
+    .hard-description strong {
+        color: var(--accent);
     }
 
     .meta {
@@ -2087,7 +2209,32 @@
     }
 
     .loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 9px;
         padding: 28px 0;
+    }
+
+    .loading-spinner {
+        width: 15px;
+        height: 15px;
+        border: 2px solid color-mix(in srgb, var(--muted) 25%, transparent);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 700ms linear infinite;
+    }
+
+    .loading-spinner.compact {
+        width: 11px;
+        height: 11px;
+        border-width: 1.5px;
+    }
+
+    @keyframes spin {
+        to {
+            transform: rotate(360deg);
+        }
     }
 
     .muted {
@@ -2374,34 +2521,25 @@
         }
 
         .daily-controls {
-            align-items: flex-start;
-            flex-direction: column;
-        }
-
-        .archive-picker {
-            width: 100%;
+            align-items: center;
         }
 
         .archive-menu {
-            width: 100%;
+            width: auto;
         }
 
         .archive-menu summary {
-            width: 100%;
+            width: auto;
             box-sizing: border-box;
-            justify-content: space-between;
         }
 
         .archive-panel {
-            position: static;
-            min-width: 0;
-            width: 100%;
-            box-sizing: border-box;
+            position: absolute;
+            min-width: 220px;
         }
 
-        .archive-picker input {
-            flex: 1;
-            max-width: none;
+        .countdown {
+            font-size: 13px;
         }
 
         .brand {
@@ -2446,6 +2584,7 @@
     }
 
     @media (prefers-reduced-motion: reduce) {
+        .game-area,
         .row,
         .progress-fill,
         .entry input,
@@ -2453,6 +2592,10 @@
         .over button {
             animation: none;
             transition: none;
+        }
+
+        .loading-spinner {
+            animation: none;
         }
     }
 </style>
